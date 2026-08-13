@@ -1090,8 +1090,13 @@ function App() {
         if (status.state === "done" || status.state === "failed") break;
         const progress = status.progress; setLayoutState({ state: "processing", message: progress?.total_pages ? `MinerU 正在解析 ${progress.extracted_pages || 0}/${progress.total_pages} 页…` : "MinerU 正在识别图表与表格…" });
       }
-      if (status?.state !== "done" || !status.zipUrl) throw new Error(status?.error || "MINERU_TIMEOUT");
-      const zipResponse = await fetch(status.zipUrl); if (!zipResponse.ok) throw new Error("MINERU_RESULT_DOWNLOAD_FAILED");
+      if (status?.state !== "done" || !status.ready) throw new Error(status?.error || "MINERU_TIMEOUT");
+      setLayoutState({ state: "processing", message: "正在获取 MinerU 版面结果…" });
+      const zipResponse = await functionRequest("mineru-layout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "download", batchId: uploaded.batchId }) });
+      if (!zipResponse.ok) {
+        const result = await zipResponse.json().catch(() => ({}));
+        throw new Error(result.error || "MINERU_RESULT_DOWNLOAD_FAILED");
+      }
       const zip = await JSZip.loadAsync(await zipResponse.arrayBuffer());
       const jsonFiles = Object.values(zip.files).filter((file: JSZip.JSZipObject) => /(?:content_list|layout)\.json$/i.test(file.name));
       const raw: unknown[] = await Promise.all(jsonFiles.map((file: JSZip.JSZipObject) => file.async("string").then((text: string) => JSON.parse(text)).catch(() => null)));

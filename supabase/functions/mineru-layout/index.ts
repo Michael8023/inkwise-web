@@ -1,5 +1,5 @@
 import { body, env, json, user } from "../_shared/core.ts";
-import { preflight } from "../_shared/cors.ts";
+import { corsHeaders, preflight } from "../_shared/cors.ts";
 
 const baseUrl = "https://mineru.net/api/v4";
 
@@ -40,7 +40,28 @@ Deno.serve(async req => {
       const payload = await response.json();
       if (!response.ok || payload?.code !== 0) throw new Error(upstreamError(payload, "MINERU_STATUS_FAILED"));
       const result = Array.isArray(payload?.data?.extract_result) ? payload.data.extract_result[0] : payload?.data?.extract_result || payload?.data;
-      return json({ state: result?.state || "pending", progress: result?.extract_progress || null, zipUrl: result?.full_zip_url || null, error: result?.err_msg || null });
+      return json({ state: result?.state || "pending", progress: result?.extract_progress || null, ready: Boolean(result?.full_zip_url), error: result?.err_msg || null });
+    }
+    if (action === "download") {
+      const batchId = String(input.batchId || "");
+      if (!/^[\w-]{8,120}$/.test(batchId)) throw new Error("MINERU_TASK_INVALID");
+      const statusResponse = await fetch(`${baseUrl}/extract-results/batch/${encodeURIComponent(batchId)}`, { headers: headers() });
+      const statusPayload = await statusResponse.json();
+      if (!statusResponse.ok || statusPayload?.code !== 0) throw new Error(upstreamError(statusPayload, "MINERU_STATUS_FAILED"));
+      const result = Array.isArray(statusPayload?.data?.extract_result) ? statusPayload.data.extract_result[0] : statusPayload?.data?.extract_result || statusPayload?.data;
+      const zipUrl = result?.full_zip_url;
+      if (result?.state !== "done" || !zipUrl) throw new Error(result?.err_msg || "MINERU_RESULT_NOT_READY");
+      const zipResponse = await fetch(zipUrl);
+      if (!zipResponse.ok) throw new Error(`MINERU_RESULT_DOWNLOAD_FAILED_${zipResponse.status}`);
+      const zip = await zipResponse.arrayBuffer();
+      if (!zip.byteLength || zip.byteLength > 50 * 1024 * 1024) throw new Error("MINERU_RESULT_INVALID");
+      return new Response(zip, {
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/zip",
+          "Cache-Control": "no-store",
+        },
+      });
     }
     throw new Error("MINERU_ACTION_INVALID");
   } catch (error) {
@@ -49,4 +70,3 @@ Deno.serve(async req => {
     return json({ error: message }, status);
   }
 });
-
