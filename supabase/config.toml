@@ -1,0 +1,16 @@
+project_id = "inkwise"
+
+[functions.models]
+verify_jwt = false
+[functions.ai-summary]
+verify_jwt = true
+[functions.ai-explain]
+verify_jwt = true
+[functions.ai-chat]
+verify_jwt = true
+[functions.translate]
+verify_jwt = true
+[functions.usage]
+verify_jwt = true
+[functions.pdf-fetch]
+verify_jwt = true

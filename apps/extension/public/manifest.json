@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "墨知 Inkwise",
+  "version": "0.1.0",
+  "description": "读懂每一页：本地 PDF 阅读、划词翻译与 AI 阅读助手。",
+  "action": { "default_title": "打开墨知 Inkwise" },
+  "background": { "service_worker": "background.js" },
+  "permissions": ["storage"],
+  "host_permissions": [
+    "https://*.supabase.co/*"
+  ]
+}
