@@ -33,6 +33,7 @@ import {
   UserRound,
 } from "lucide-react";
 import "./style.css";
+import { mountAdmin } from "./admin";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   "pdfjs-dist/build/pdf.worker.mjs",
@@ -1337,4 +1338,5 @@ function App() {
     </div>
   );
 }
-createRoot(document.getElementById("root")!).render(<App />);
+if (window.location.pathname === "/admin" || window.location.pathname.startsWith("/admin/")) mountAdmin();
+else createRoot(document.getElementById("root")!).render(<App />);
