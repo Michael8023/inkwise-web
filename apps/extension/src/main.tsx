@@ -1091,7 +1091,7 @@ function App() {
       setLayoutState({ state: "uploading", message: "正在上传 PDF 到 MinerU…", progress: 8 });
       await new Promise<void>((resolve, reject) => {
         const request = new XMLHttpRequest();
-        request.open("PUT", prepared.uploadUrl);
+        request.open("PUT", `/api/mineru-upload?target=${encodeURIComponent(prepared.uploadUrl)}`);
         request.upload.onprogress = event => {
           if (event.lengthComputable) setLayoutState({ state: "uploading", message: `正在上传 PDF 到 MinerU… ${Math.round(event.loaded / event.total * 100)}%`, progress: 8 + Math.round(event.loaded / event.total * 32) });
         };
