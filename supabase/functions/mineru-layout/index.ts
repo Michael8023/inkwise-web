@@ -31,7 +31,13 @@ Deno.serve(async req => {
       });
       const payload = await response.json();
       if (!response.ok || payload?.code !== 0 || !payload?.data?.file_urls?.[0]) throw new Error(upstreamError(payload, "MINERU_PREPARE_FAILED"));
-      return json({ batchId: payload.data.batch_id, uploadUrl: payload.data.file_urls[0] });
+      return json({
+        batchId: payload.data.batch_id,
+        uploadUrl: payload.data.file_urls[0],
+        // MinerU currently returns a presigned URL without extra headers. Keep
+        // this explicit so the browser/Worker never guesses signed headers.
+        uploadHeaders: payload.data.upload_headers || {},
+      });
     }
     if (action === "status") {
       const batchId = String(input.batchId || "");

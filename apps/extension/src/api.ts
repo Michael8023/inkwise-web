@@ -28,8 +28,15 @@ export async function functionRequest(
     "Authorization",
     `Bearer ${data.session?.access_token || supabaseAnonKey}`,
   );
-  return fetch(`${supabaseUrl}/functions/v1/${functionName}`, {
-    ...init,
-    headers,
-  });
+  try {
+    return await fetch(`${supabaseUrl}/functions/v1/${functionName}`, {
+      ...init,
+      headers,
+    });
+  } catch (error) {
+    if (error instanceof TypeError && /fetch/i.test(error.message)) {
+      throw new Error("NETWORK_REQUEST_FAILED");
+    }
+    throw error;
+  }
 }

@@ -9,7 +9,7 @@ verify_jwt = true
 [functions.ai-chat]
 verify_jwt = true
 [functions.translate]
-verify_jwt = true
+verify_jwt = false
 [functions.usage]
 verify_jwt = true
 [functions.pdf-fetch]

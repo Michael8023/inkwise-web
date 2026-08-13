@@ -7,6 +7,7 @@ import { functionRequest, supabase, supabaseConfigured } from "./api";
 import {
   ChevronDown,
   ChevronRight,
+  Check,
   Copy,
   FileText,
   FolderOpen,
@@ -77,15 +78,17 @@ type VisualRegion = {
   id: string;
   kind: "image" | "table" | "formula" | "caption";
   captionFor?: "image" | "table";
+  content?: string;
   area: { x: number; y: number; width: number; height: number };
   pageNumber?: number;
 };
 type LayoutState = { state: "idle" | "preparing" | "uploading" | "processing" | "downloading" | "done" | "error"; message?: string; progress?: number };
 type Tab = "summary" | "chat" | "history";
-type OutlineItem = { title: string; dest?: unknown; items?: OutlineItem[] };
+type OutlineItem = { title: string; dest?: unknown; pageNumber?: number; items?: OutlineItem[] };
 type ChatMessage = { role: "user" | "assistant"; content: string };
 type AuthSession = { user: { id: string; email?: string; user_metadata?: Record<string, unknown> } };
 type Usage = { plan: string; creditsRemaining: number; periodEnd: string | null };
+const PUBLIC_READER_ORIGIN = "https://www.inkwise.site";
 
 function cropPdfCanvas(source: HTMLCanvasElement, area: VisualRegion["area"]) {
   const sx = Math.round(area.x * source.width), sy = Math.round(area.y * source.height);
@@ -105,6 +108,13 @@ async function copyImageDataUrl(dataUrl: string) {
   canvas.getContext("2d")?.drawImage(image, 0, 0);
   const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(value => value ? resolve(value) : reject(new Error("IMAGE_INVALID")), "image/png"));
   await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+}
+
+function stripStandaloneLineNumbers(value: string) {
+  return value
+    .replace(/(^|\n)\s*\d{1,4}(?=\s|$)/g, "$1")
+    .replace(/\s{2,}/g, " ")
+    .trim();
 }
 
 function overlapRatio(a: VisualRegion["area"], b: VisualRegion["area"]) {
@@ -208,6 +218,23 @@ function collectMineruRegions(value: unknown, pageSizes: Array<{ width: number; 
     if (/figure|image|img|picture/.test(label)) return { kind: "image" };
     return null;
   };
+  const formulaContent = (node: any): string | undefined => {
+    // The layout result has used several names across API versions. Prefer
+    // raw LaTeX, then Markdown/text, including values nested in `content`.
+    const read = (value: unknown, depth = 0): string | undefined => {
+      if (depth > 3 || value == null) return undefined;
+      if (typeof value === "string") return value.trim() || undefined;
+      if (Array.isArray(value)) return value.map(item => read(item, depth + 1)).filter(Boolean).join("\n") || undefined;
+      if (typeof value !== "object") return undefined;
+      const record = value as Record<string, unknown>;
+      for (const key of ["latex", "latex_text", "equation_latex", "formula_latex", "katex", "tex", "markdown", "md", "md_text", "text", "block_text", "equation", "content"]) {
+        const result = read(record[key], depth + 1);
+        if (result) return result;
+      }
+      return undefined;
+    };
+    return read(node);
+  };
   const visit = (node: any, inheritedPage?: number, sourceKey = "") => {
     if (!node || typeof node !== "object") return;
     if (Array.isArray(node)) { node.forEach(item => visit(item, inheritedPage, sourceKey)); return; }
@@ -217,7 +244,7 @@ function collectMineruRegions(value: unknown, pageSizes: Array<{ width: number; 
     if (regionType && box && Number.isInteger(page) && page >= 0 && page < pageSizes.length) {
       const size = pageSizes[page]; const [x0, y0, x1, y1] = box;
       const area = { x: Math.max(0, x0 / size.width), y: Math.max(0, y0 / size.height), width: Math.min(1, (x1 - x0) / size.width), height: Math.min(1, (y1 - y0) / size.height) };
-      if (area.width > .01 && area.height > .01) found.push({ id: crypto.randomUUID(), ...regionType, area, pageNumber: page + 1 });
+      if (area.width > .01 && area.height > .01) found.push({ id: crypto.randomUUID(), ...regionType, content: regionType.kind === "formula" ? formulaContent(node) : undefined, area, pageNumber: page + 1 });
     }
     Object.entries(node).forEach(([key, child]) => { if (!["bbox", "box", "bounding_box", "poly"].includes(key)) visit(child, page, key); });
   };
@@ -227,6 +254,35 @@ function collectMineruRegions(value: unknown, pageSizes: Array<{ width: number; 
     if (!unique.some(other => other.pageNumber === region.pageNumber && other.kind === region.kind && overlapRatio(other.area, region.area) > .8)) unique.push(region);
   }
   return unique;
+}
+
+function collectMineruOutline(values: unknown[], pageCount: number): OutlineItem[] {
+  const headings: Array<{ title: string; level: number; pageNumber: number; order: number }> = [];
+  let order = 0;
+  const visit = (node: any, inheritedPage?: number) => {
+    if (!node || typeof node !== "object") return;
+    if (Array.isArray(node)) { node.forEach(item => visit(item, inheritedPage)); return; }
+    const pageValue = Number(node.page_idx ?? node.page_id ?? node.page_no ?? node.page ?? inheritedPage);
+    const pageNumber = Number.isInteger(pageValue) && pageValue >= 0 && pageValue < pageCount ? pageValue + 1 : undefined;
+    const type = String(node.type || node.category || node.block_type || node.layout_type || "").toLowerCase();
+    const text = String(node.text ?? node.content ?? node.md_text ?? "").replace(/\s+/g, " ").trim();
+    const rawLevel = Number(node.text_level ?? node.level ?? node.heading_level ?? node.title_level);
+    const isHeading = Boolean(text) && ((Number.isFinite(rawLevel) && rawLevel > 0) || /title|heading|header|section/.test(type));
+    if (isHeading && pageNumber) headings.push({ title: text.slice(0, 160), level: Number.isFinite(rawLevel) && rawLevel > 0 ? Math.min(6, rawLevel) : 1, pageNumber, order: order++ });
+    Object.entries(node).forEach(([key, child]) => { if (!["bbox", "box", "bounding_box", "poly", "text", "content", "md_text"].includes(key)) visit(child, pageValue); });
+  };
+  values.forEach(value => visit(value));
+  const unique = headings.filter((item, index) => index === headings.findIndex(other => other.title === item.title && other.pageNumber === item.pageNumber));
+  const roots: OutlineItem[] = [];
+  const stack: Array<{ level: number; item: OutlineItem }> = [];
+  for (const heading of unique) {
+    const item: OutlineItem = { title: heading.title, pageNumber: heading.pageNumber, dest: heading.pageNumber };
+    while (stack.length && stack[stack.length - 1].level >= heading.level) stack.pop();
+    if (stack.length) { const parent = stack[stack.length - 1].item; (parent.items ||= []).push(item); }
+    else roots.push(item);
+    stack.push({ level: heading.level, item });
+  }
+  return roots;
 }
 const apiErrors: Record<string, string> = {
   AUTH_REQUIRED: "请先登录后使用 AI 功能。",
@@ -252,8 +308,8 @@ const apiErrors: Record<string, string> = {
   AI_VISUAL_FAILED: "图表识别失败，请稍后重试。",
   AI_UPSTREAM_TIMEOUT: "AI 图表分析超时，额度已退回，请稍后重试或切换模型。",
   REQUEST_TIMEOUT: "请求超时，请检查网络后重试。",
-  MINERU_FILE_TOO_LARGE: "当前 PDF 超过 15MB，暂时无法通过安全代理上传至 MinerU。",
-  MINERU_UPLOAD_FAILED: "PDF 上传到 MinerU 失败，请稍后重试。",
+  MINERU_FILE_TOO_LARGE: "当前 PDF 超过 15MB，暂时无法进行智能版面分析。",
+  MINERU_UPLOAD_FAILED: "文档上传失败，请稍后重试。",
 };
 function readableApiError(error: unknown, fallback: string) { const code=error instanceof Error?error.message:String(error||""); return apiErrors[code]||fallback; }
 
@@ -383,8 +439,8 @@ function OutlineTree({
           style={{ paddingLeft: `${8 + depth * 14}px` }}
         >
           <button
-            disabled={!item.dest}
-            onClick={() => item.dest && onNavigate(item.dest)}
+            disabled={!item.dest && !item.pageNumber}
+            onClick={() => (item.dest || item.pageNumber) && onNavigate(item.dest ?? item.pageNumber)}
           >
             {item.items?.length ? (
               <ChevronRight size={13} />
@@ -427,6 +483,7 @@ function SelectionPopover({
   const dragStart = useRef<{ x: number; y: number; offsetX: number; offsetY: number } | null>(null);
   const [position, setPosition] = useState({ left: -9999, top: -9999 });
   const [followup, setFollowup] = useState("");
+  const [collapsed, setCollapsed] = useState(false);
 
   useLayoutEffect(() => {
     const updatePosition = () => {
@@ -494,7 +551,7 @@ function SelectionPopover({
   return (
     <div
       ref={popoverRef}
-      className="selection-popover"
+      className={`selection-popover${collapsed ? " collapsed" : ""}`}
       style={position}
       onMouseDown={(event) => event.stopPropagation()}
       onMouseUp={(event) => event.stopPropagation()}
@@ -502,6 +559,14 @@ function SelectionPopover({
       aria-label="选区操作"
     >
       <button
+        className="popover-collapse"
+        aria-label={collapsed ? "展开浮窗" : "折叠浮窗"}
+        title={collapsed ? "展开" : "折叠"}
+        onClick={() => setCollapsed(value => !value)}
+      >
+        <ChevronDown size={15} />
+      </button>
+      {!collapsed && <button
         className="popover-drag-handle"
         aria-label="拖动浮窗"
         title="拖动浮窗"
@@ -511,7 +576,7 @@ function SelectionPopover({
         onPointerCancel={stopDrag}
       >
         <GripVertical size={15} />
-      </button>
+      </button>}
       <button
         className="popover-close"
         aria-label="关闭选区"
@@ -520,7 +585,8 @@ function SelectionPopover({
       >
         <X size={15} />
       </button>
-      <p className="popover-text">{selection.text}</p>
+      <div className="popover-collapsed-title">{selection.text}</div>
+      {!collapsed && <><p className="popover-text">{selection.text}</p>
       <div className="popover-actions">
         <button onClick={() => onTask(selection, "translate")} disabled={selection.task?.state === "loading"}>译 翻译</button>
         <button onClick={() => onTask(selection, "explain")} disabled={selection.task?.state === "loading"}>✦ 解释</button>
@@ -539,6 +605,7 @@ function SelectionPopover({
           <button type="submit" disabled={!followup.trim()}><Send size={14} /></button>
         </form>
       )}
+      </>}
     </div>
   );
 }
@@ -553,6 +620,7 @@ function VisualPopover({ selection, pageRef, onClose, onTask, onFollowup }: {
   const ref = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState({ left: -9999, top: -9999 });
   const [followup, setFollowup] = useState("");
+  const [collapsed, setCollapsed] = useState(false);
   useLayoutEffect(() => {
     const update = () => {
       const page = pageRef.current, popover = ref.current;
@@ -572,14 +640,14 @@ function VisualPopover({ selection, pageRef, onClose, onTask, onFollowup }: {
   async function copyImage() {
     await copyImageDataUrl(selection.imageDataUrl);
   }
-  return <div ref={ref} className="selection-popover visual-popover" style={position} onMouseDown={event => event.stopPropagation()} role="dialog" aria-label="图表操作">
-    <div className="visual-popover-header"><div className="visual-title"><ScanLine size={15}/><strong>图表选区</strong><span>第 {selection.pageNumber} 页</span></div><button className="popover-close" aria-label="关闭" title="关闭" onClick={() => onClose(selection.id)}><X size={15}/></button></div>
-    <div className="visual-popover-scroll">
+  return <div ref={ref} className={`selection-popover visual-popover${collapsed ? " collapsed" : ""}`} style={position} onMouseDown={event => event.stopPropagation()} role="dialog" aria-label="图表操作">
+    <div className="visual-popover-header"><button className="popover-collapse" aria-label={collapsed ? "展开浮窗" : "折叠浮窗"} title={collapsed ? "展开" : "折叠"} onClick={() => setCollapsed(value => !value)}><ChevronDown size={15}/></button><div className="visual-title"><ScanLine size={15}/><strong>图表选区</strong><span>第 {selection.pageNumber} 页</span></div><button className="popover-close" aria-label="关闭" title="关闭" onClick={() => onClose(selection.id)}><X size={15}/></button></div>
+    {!collapsed && <div className="visual-popover-scroll">
       <img src={selection.imageDataUrl} alt="框选的 PDF 区域"/>
       <div className="popover-actions visual-actions"><button onClick={() => onTask(selection, "explain")} disabled={selection.task?.state === "loading"}><ImageIcon size={14}/>AI 解读</button><button onClick={() => onTask(selection, "table")} disabled={selection.task?.state === "loading"}><Table2 size={14}/>提取表格</button><button title="复制图片" onClick={() => copyImage().catch(() => undefined)}><Copy size={14}/></button><a title="下载图片" href={selection.imageDataUrl} download={`inkwise-page-${selection.pageNumber}.jpg`}><Download size={14}/></a></div>
       {selection.task && <div className={`popover-result ${selection.task.state}`}>{selection.task.state === "loading" ? "正在理解图表…" : <><ReactMarkdown>{selection.task.result || ""}</ReactMarkdown>{selection.task.state === "done" && <button className="visual-copy-result" onClick={() => navigator.clipboard.writeText(selection.task?.result || "")}><Copy size={13}/>复制结果</button>}</>}</div>}
       {selection.task?.kind === "explain" && selection.task.state === "done" && <form className="explain-followup" onSubmit={event => { event.preventDefault(); const value=followup.trim(); if (!value || !onFollowup) return; onFollowup(selection,value); setFollowup(""); }}><input value={followup} onChange={event => setFollowup(event.target.value)} placeholder="继续追问这张图…"/><button disabled={!followup.trim()}><Send size={14}/></button></form>}
-    </div>
+    </div>}
   </div>;
 }
 
@@ -639,6 +707,7 @@ function PageView({
   const [visualDraft, setVisualDraft] = useState<{ startX: number; startY: number; x: number; y: number; width: number; height: number } | null>(null);
   const [visualRegions, setVisualRegions] = useState<VisualRegion[]>([]);
   const [activeVisualRegion, setActiveVisualRegion] = useState<string | null>(null);
+  const [copiedVisualRegion, setCopiedVisualRegion] = useState<string | null>(null);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -693,6 +762,13 @@ function PageView({
           container: layer,
           viewport,
         }).render();
+        // Many research PDFs expose left-margin line numbers as regular text.
+        // Keep them visible, but stop them becoming part of a text selection.
+        Array.from(layer.querySelectorAll("span")).forEach((span) => {
+          const value = span.textContent?.trim() || "";
+          const left = Number.parseFloat(span.style.left || "100");
+          if (/^\d{1,4}$/.test(value) && left < 7) span.classList.add("pdf-line-number");
+        });
         setLoading(false);
       }
     }
@@ -705,7 +781,7 @@ function PageView({
   function selectText() {
     if (visualMode) return;
     const nativeSelection = window.getSelection();
-    const text = nativeSelection?.toString().trim();
+    const text = stripStandaloneLineNumbers(nativeSelection?.toString() || "");
     if (!text || !nativeSelection?.rangeCount || !hostRef.current) return;
     const range = nativeSelection.getRangeAt(0);
     const selectedNode =
@@ -776,6 +852,11 @@ function PageView({
     return onVisualSelect(selection);
   }
   async function copyVisualRegion(region: VisualRegion) {
+    if (region.kind === "formula") {
+      if (!region.content) throw new Error("FORMULA_TEXT_UNAVAILABLE");
+      await navigator.clipboard.writeText(region.content);
+      return;
+    }
     const canvas = canvasRef.current; if (!canvas) return;
     await copyImageDataUrl(cropPdfCanvas(canvas, region.area));
   }
@@ -833,7 +914,8 @@ function PageView({
         <div className="auto-visual-regions" aria-label="自动识别的文档结构区域">{(mineruReady ? mineruRegions : visualRegions).map(region => {
           const label = region.kind === "table" ? "表格" : region.kind === "formula" ? "公式" : region.kind === "caption" ? (region.captionFor === "table" ? "表题" : region.captionFor === "image" ? "图题" : "标题") : "图片";
           const actionable = region.kind !== "caption";
-          return <div key={region.id} className={`auto-visual-region ${region.kind}${activeVisualRegion === region.id ? " active" : ""}`} style={{ left: `${region.area.x * 100}%`, top: `${region.area.y * 100}%`, width: `${region.area.width * 100}%`, height: `${region.area.height * 100}%` }} onMouseEnter={() => setActiveVisualRegion(region.id)} onMouseLeave={() => setActiveVisualRegion(current => current === region.id ? null : current)}><div className="auto-visual-actions"><span>{label}</span>{actionable && <><button title="复制" aria-label={`复制${label}`} onClick={event => { event.stopPropagation(); copyVisualRegion(region).catch(() => undefined); }}><Copy size={13}/></button><button title="结合论文解释" aria-label={`解释${label}`} onClick={event => { event.stopPropagation(); const selection=createSelectionFromRegion(region); if (selection) onVisualTask(selection,"explain"); }}><Sparkles size={13}/></button></>}</div></div>;
+          const copied = copiedVisualRegion === region.id;
+          return <div key={region.id} className={`auto-visual-region ${region.kind}${activeVisualRegion === region.id ? " active" : ""}`} style={{ left: `${region.area.x * 100}%`, top: `${region.area.y * 100}%`, width: `${region.area.width * 100}%`, height: `${region.area.height * 100}%` }} onMouseEnter={() => setActiveVisualRegion(region.id)} onMouseLeave={() => { setActiveVisualRegion(current => current === region.id ? null : current); setCopiedVisualRegion(current => current === region.id ? null : current); }}><div className="auto-visual-actions"><span>{label}</span>{actionable && <><button className={copied ? "copied" : ""} title={region.kind === "formula" ? "复制公式源码" : "复制"} aria-label={`复制${label}`} disabled={region.kind === "formula" && !region.content} onClick={event => { event.stopPropagation(); setCopiedVisualRegion(region.id); copyVisualRegion(region).catch(() => setCopiedVisualRegion(null)); }}>{copied ? <Check size={13}/> : <Copy size={13}/>}</button><button title="结合论文解释" aria-label={`解释${label}`} onClick={event => { event.stopPropagation(); const selection=createSelectionFromRegion(region); if (selection) onVisualTask(selection,"explain"); }}><Sparkles size={13}/></button></>}</div></div>;
         })}</div>
         {visualSelections.map(selection => <div key={selection.id} className="visual-selection-area" style={{ left: `${selection.area.x * 100}%`, top: `${selection.area.y * 100}%`, width: `${selection.area.width * 100}%`, height: `${selection.area.height * 100}%` }} />)}
         <div className="temporary-selection-layer" aria-hidden="true">
@@ -886,7 +968,11 @@ function App() {
   const [panelOpen, setPanelOpen] = useState(true);
   const [panelWidth, setPanelWidth] = useState(400);
   const panelResize = useRef<{ startX: number; startWidth: number } | null>(null);
-  const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [theme, setTheme] = useState<"light" | "dark">(() => {
+    const stored = window.localStorage.getItem("inkwise-theme");
+    if (stored === "light" || stored === "dark") return stored;
+    return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  });
   const [tab, setTab] = useState<Tab>("summary");
   const [selections, setSelections] = useState<Selection[]>([]);
   const [highlights, setHighlights] = useState<SavedHighlight[]>([]);
@@ -895,12 +981,16 @@ function App() {
   const [mineruRegions, setMineruRegions] = useState<VisualRegion[]>([]);
   const [mineruReady, setMineruReady] = useState(false);
   const [layoutState, setLayoutState] = useState<LayoutState>({ state: "idle" });
+  const [layoutNoticeOpen, setLayoutNoticeOpen] = useState(true);
+  const [layoutNoticeVisible, setLayoutNoticeVisible] = useState(false);
   const pdfBytes = useRef<ArrayBuffer | null>(null);
   const autoLayoutDocument = useRef("");
   const fileInput = useRef<HTMLInputElement>(null);
+  const readerFileInput = useRef<HTMLInputElement>(null);
   const [documentId, setDocumentId] = useState("");
   const [documentText, setDocumentText] = useState("");
   const [documentReady, setDocumentReady] = useState(false);
+  const [pdfOpening, setPdfOpening] = useState(false);
   const [models, setModels] = useState<Array<{ id: string; name: string }>>([]);
   const [model, setModel] = useState("");
   const [defaultModel, setDefaultModel] = useState("");
@@ -914,6 +1004,9 @@ function App() {
   const [question, setQuestion] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
   const [pageInput, setPageInput] = useState("1");
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchNotice, setSearchNotice] = useState("");
   const [highlightMode, setHighlightMode] = useState(false);
   const [session, setSession] = useState<AuthSession | null>(null);
   const [usage, setUsage] = useState<Usage | null>(null);
@@ -932,8 +1025,44 @@ function App() {
   const [urlError, setUrlError] = useState("");
 
   useEffect(() => {
+    const trustedOrigins = new Set([window.location.origin, PUBLIC_READER_ORIGIN]);
+    const onMessage = (event: MessageEvent) => {
+      if (event.data?.type === "inkwise-open-pdf-ready") {
+        return;
+      }
+      if (!trustedOrigins.has(event.origin) || event.data?.type !== "inkwise-open-pdf") return;
+      const candidate = event.data.bytes;
+      const bytes = candidate instanceof ArrayBuffer
+        ? candidate
+        : candidate && typeof candidate.byteLength === "number"
+          ? candidate.buffer instanceof ArrayBuffer
+            ? candidate.buffer.slice(candidate.byteOffset || 0, (candidate.byteOffset || 0) + candidate.byteLength)
+            : null
+          : null;
+      if (!bytes) return;
+      void openPdfData(bytes, String(event.data.name || "document.pdf"));
+      if (event.source && "postMessage" in event.source) {
+        (event.source as Window).postMessage({ type: "inkwise-open-pdf-ack", token: event.data.token }, event.origin);
+      }
+    };
+    window.addEventListener("message", onMessage);
+    if (window.opener && window.opener !== window) {
+      try { window.opener.postMessage({ type: "inkwise-open-pdf-ready" }, PUBLIC_READER_ORIGIN); } catch { /* opener may be unavailable */ }
+    }
+    return () => window.removeEventListener("message", onMessage);
+  }, []);
+
+  useEffect(() => {
     document.documentElement.dataset.theme = theme;
+    window.localStorage.setItem("inkwise-theme", theme);
   }, [theme]);
+  useEffect(() => {
+    const url = new URL(window.location.href).searchParams.get("openPdfUrl");
+    if (!url) return;
+    window.history.replaceState({}, "", window.location.pathname);
+    setPaperUrl(url);
+    void loadPdfUrl(url);
+  }, []);
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session as AuthSession | null));
     const { data } = supabase.auth.onAuthStateChange((_event, next) => {
@@ -970,6 +1099,18 @@ function App() {
     autoLayoutDocument.current = documentId;
     void runMineruLayout();
   }, [session, documentReady, documentId]);
+  useEffect(() => {
+    if (!documentReady) return;
+    // Let the ink bloom complete before removing the transition layer. This
+    // keeps the PDF hidden until the full-screen wash has faded into it.
+    const timer = window.setTimeout(() => setPdfOpening(false), 3050);
+    return () => window.clearTimeout(timer);
+  }, [documentReady]);
+  useEffect(() => {
+    if (layoutState.state !== "done") return;
+    const timer = window.setTimeout(() => setLayoutNoticeVisible(false), 3600);
+    return () => window.clearTimeout(timer);
+  }, [layoutState.state]);
   useEffect(() => {
     const onMove = (event: MouseEvent) => {
       if (!panelResize.current) return;
@@ -1064,7 +1205,8 @@ function App() {
 
   async function openPdfData(data: ArrayBuffer, name: string) {
     try {
-      setSelections([]); setHighlights([]); setVisualSelections([]); setVisualMode(false); setMineruRegions([]); setMineruReady(false); setLayoutState({ state: "idle" }); autoLayoutDocument.current = "";
+      setPdfOpening(true);
+      setSelections([]); setHighlights([]); setVisualSelections([]); setVisualMode(false); setMineruRegions([]); setMineruReady(false); setLayoutState({ state: "idle" }); setLayoutNoticeOpen(true); setLayoutNoticeVisible(false); autoLayoutDocument.current = "";
       setDocumentReady(false);
       setFileName(name);
       pdfBytes.current = data.slice(0);
@@ -1089,6 +1231,7 @@ function App() {
       setCurrentPage(1);
       setDocumentReady(true);
     } catch {
+      setPdfOpening(false);
       setPdf(null);
       setOutline([]);
       setDocumentReady(false);
@@ -1098,25 +1241,72 @@ function App() {
   async function openFile(file: File) {
     await openPdfData(await file.arrayBuffer(), file.name);
   }
+  async function openFileInNewTab(file: File) {
+    const targetOrigin = PUBLIC_READER_ORIGIN;
+    const target = window.open(`${targetOrigin}/`, "_blank");
+    if (!target) return;
+    const bytes = await file.arrayBuffer();
+    const message = { type: "inkwise-open-pdf", token: crypto.randomUUID(), name: file.name, bytes };
+    let acknowledged = false;
+    const onAck = (event: MessageEvent) => {
+      if (event.origin !== targetOrigin || event.data?.type !== "inkwise-open-pdf-ack" || event.data.token !== message.token) return;
+      acknowledged = true;
+      window.removeEventListener("message", onAck);
+      window.clearInterval(retry);
+    };
+    window.addEventListener("message", onAck);
+    const send = (destination: Window = target) => {
+      if (acknowledged || destination.closed) return;
+      try { destination.postMessage(message, targetOrigin); } catch { /* wait for ready handshake */ }
+    };
+    const onReady = (event: MessageEvent) => {
+      if (event.origin !== targetOrigin || event.source !== target || event.data?.type !== "inkwise-open-pdf-ready") return;
+      send(event.source as Window);
+    };
+    window.addEventListener("message", onReady);
+    target.addEventListener?.("load", () => send());
+    let attempts = 0;
+    const retry = window.setInterval(() => {
+      send();
+      attempts += 1;
+      if (attempts >= 12 || target.closed) {
+        window.clearInterval(retry);
+        window.removeEventListener("message", onAck);
+        window.removeEventListener("message", onReady);
+      }
+    }, 250);
+  }
   async function runMineruLayout() {
     if (!pdf || !pdfBytes.current || layoutState.state === "preparing" || layoutState.state === "uploading" || layoutState.state === "processing" || layoutState.state === "downloading") return;
     try {
       const bytes = pdfBytes.current;
-      setLayoutState({ state: "preparing", message: "正在创建 MinerU 分析任务…", progress: 4 });
+      setLayoutNoticeOpen(true); setLayoutNoticeVisible(true);
+      setLayoutState({ state: "preparing", message: "正在准备智能版面分析…", progress: 4 });
       const preparedResponse = await functionRequest("mineru-layout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "prepare", name: fileName || "document.pdf" }) });
       const prepared = await preparedResponse.json(); if (!preparedResponse.ok) throw new Error(prepared.error || "MINERU_PREPARE_FAILED");
-      setLayoutState({ state: "uploading", message: "正在上传 PDF 到 MinerU…", progress: 8 });
+      setLayoutState({ state: "uploading", message: "正在上传文档…", progress: 8 });
       await new Promise<void>((resolve, reject) => {
         const request = new XMLHttpRequest();
-        request.open("PUT", `/api/mineru-upload?target=${encodeURIComponent(prepared.uploadUrl)}`);
+        const uploadTarget = new URL("/api/mineru-upload", window.location.origin);
+        uploadTarget.searchParams.set("target", prepared.uploadUrl);
+        uploadTarget.searchParams.set("headers", btoa(JSON.stringify(prepared.uploadHeaders || {})));
+        request.open("PUT", uploadTarget.toString());
         request.upload.onprogress = event => {
-          if (event.lengthComputable) setLayoutState({ state: "uploading", message: `正在上传 PDF 到 MinerU… ${Math.round(event.loaded / event.total * 100)}%`, progress: 8 + Math.round(event.loaded / event.total * 32) });
+          if (event.lengthComputable) setLayoutState({ state: "uploading", message: `正在上传文档… ${Math.round(event.loaded / event.total * 100)}%`, progress: 8 + Math.round(event.loaded / event.total * 32) });
         };
         request.onerror = () => reject(new Error("MINERU_BROWSER_UPLOAD_FAILED"));
-        request.onload = () => request.status >= 200 && request.status < 300 ? resolve() : reject(new Error(`MINERU_UPLOAD_FAILED_${request.status}`));
+        request.onload = () => {
+          if (request.status >= 200 && request.status < 300) { resolve(); return; }
+          try {
+            const result = JSON.parse(request.responseText) as { error?: string };
+            reject(new Error(result.error || `MINERU_UPLOAD_FAILED_${request.status}`));
+          } catch {
+            reject(new Error(`MINERU_UPLOAD_FAILED_${request.status}`));
+          }
+        };
         request.send(bytes);
       });
-      setLayoutState({ state: "processing", message: "MinerU 正在识别图表与表格…", progress: 40 });
+      setLayoutState({ state: "processing", message: "正在识别图表、表格与公式…", progress: 40 });
       let status: any;
       for (let attempt = 0; attempt < 60; attempt += 1) {
         await new Promise(resolve => window.setTimeout(resolve, 3000));
@@ -1125,10 +1315,10 @@ function App() {
         if (status.state === "done" || status.state === "failed") break;
         const progress = status.progress;
         const parsed = progress?.total_pages ? Math.min(94, 40 + Math.round(54 * (progress.extracted_pages || 0) / progress.total_pages)) : Math.min(90, 43 + attempt);
-        setLayoutState({ state: "processing", message: progress?.total_pages ? `MinerU 正在解析 ${progress.extracted_pages || 0}/${progress.total_pages} 页…` : "MinerU 正在识别图表与表格…", progress: parsed });
+        setLayoutState({ state: "processing", message: progress?.total_pages ? `正在解析 ${progress.extracted_pages || 0}/${progress.total_pages} 页…` : "正在识别图表、表格与公式…", progress: parsed });
       }
       if (status?.state !== "done" || !status.ready) throw new Error(status?.error || "MINERU_TIMEOUT");
-      setLayoutState({ state: "downloading", message: "正在获取 MinerU 版面结果…", progress: 96 });
+      setLayoutState({ state: "downloading", message: "正在整理分析结果…", progress: 96 });
       const zipResponse = await functionRequest("mineru-layout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "download", batchId: prepared.batchId }) });
       if (!zipResponse.ok) {
         const result = await zipResponse.json().catch(() => ({}));
@@ -1139,11 +1329,13 @@ function App() {
       const raw: unknown[] = await Promise.all(jsonFiles.map((file: JSZip.JSZipObject) => file.async("string").then((text: string) => JSON.parse(text)).catch(() => null)));
       const sizes = await Promise.all(Array.from({ length: pdf.numPages }, (_, index) => pdf.getPage(index + 1).then((page: any) => { const viewport = page.getViewport({ scale: 1 }); return { width: viewport.width, height: viewport.height }; })));
       const regions = raw.flatMap((value: unknown) => collectMineruRegions(value, sizes));
+      const parsedOutline = collectMineruOutline(raw, pdf.numPages);
+      if (parsedOutline.length) setOutline(parsedOutline);
       setMineruRegions(regions); setMineruReady(true);
-      setLayoutState({ state: "done", message: regions.length ? `已识别 ${regions.filter((item: VisualRegion) => item.kind === "image").length} 张图片、${regions.filter((item: VisualRegion) => item.kind === "table").length} 个表格与 ${regions.filter((item: VisualRegion) => item.kind === "formula").length} 条公式` : "MinerU 已完成版面分析，未发现可交互结构区域。", progress: 100 });
+      setLayoutState({ state: "done", message: regions.length ? `已识别 ${regions.filter((item: VisualRegion) => item.kind === "image").length} 张图片、${regions.filter((item: VisualRegion) => item.kind === "table").length} 个表格与 ${regions.filter((item: VisualRegion) => item.kind === "formula").length} 条公式` : "智能版面分析已完成，未发现可交互结构区域。", progress: 100 });
     } catch (error) {
       const message = error instanceof Error ? error.message : "MINERU_REQUEST_FAILED";
-      setLayoutState({ state: "error", message: message.includes("MINERU_API_TOKEN_NOT_CONFIGURED") ? "尚未配置 MinerU Token，仍使用本地识别。" : `MinerU 版面分析失败：${message}` });
+      setLayoutState({ state: "error", message: message.includes("MINERU_API_TOKEN_NOT_CONFIGURED") ? "智能版面分析暂不可用，仍使用本地识别。" : "智能版面分析暂时失败，仍可使用本地识别。" });
     }
   }
   function validatePdfUrl(value: string) {
@@ -1154,10 +1346,10 @@ function App() {
     }
     return parsed;
   }
-  async function openPdfUrl() {
+  async function loadPdfUrl(value: string) {
     setUrlError("");
     let parsed: URL;
-    try { parsed = validatePdfUrl(paperUrl.trim()); } catch (error) { setUrlError(error instanceof Error ? error.message : "链接格式不正确。"); return; }
+    try { parsed = validatePdfUrl(value.trim()); } catch (error) { setUrlError(error instanceof Error ? error.message : "链接格式不正确。"); return; }
     setUrlLoading(true);
     try {
       let response: Response;
@@ -1192,6 +1384,17 @@ function App() {
     } catch (error) {
       setUrlError(readableApiError(error, "无法读取该 PDF 链接。"));
     } finally { setUrlLoading(false); }
+  }
+  async function openPdfUrl() {
+    setUrlError("");
+    try {
+      const parsed = validatePdfUrl(paperUrl.trim());
+      const target = window.open(`${window.location.origin}/?openPdfUrl=${encodeURIComponent(parsed.toString())}`, "_blank");
+      if (!target) throw new Error("浏览器阻止了新标签页，请允许本站打开新窗口。");
+      setUrlOpen(false);
+    } catch (error) {
+      setUrlError(error instanceof Error ? error.message : "链接格式不正确。");
+    }
   }
   async function requestSummary(kind: "short" | "full") {
     if (!documentReady || !defaultModel || !documentId) return;
@@ -1283,7 +1486,7 @@ function App() {
     updateTask(selection.id, { kind: "explain", state: "loading" });
     try {
       if (!session) throw new Error("AUTH_REQUIRED");
-      const response = await functionRequest("ai-explain", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ selectedText: selection.text, nearbyContext: `${selection.context}\n\n上一轮解释：\n${selection.task?.result || ""}\n\n追问：${question}`, documentContext: documentText.slice(0, 100000), pageNumber: selection.pageNumber, model, requestId: crypto.randomUUID() }) });
+      const response = await functionRequest("ai-explain", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ selectedText: stripStandaloneLineNumbers(selection.text), nearbyContext: `${stripStandaloneLineNumbers(selection.context)}\n\n上一轮解释：\n${selection.task?.result || ""}\n\n追问：${question}`, documentContext: stripStandaloneLineNumbers(documentText.slice(0, 100000)), pageNumber: selection.pageNumber, model, requestId: crypto.randomUUID() }) });
       const result = await response.json(); if (!response.ok) throw new Error(result.error);
       updateTask(selection.id, { kind: "explain", state: "done", result: result.text });
       if (typeof result.creditsRemaining === "number") setUsage((current) => current ? { ...current, creditsRemaining: result.creditsRemaining } : current);
@@ -1322,6 +1525,8 @@ function App() {
     updateTask(selection.id, { kind, state: "loading" });
     try {
       if (kind === "explain" && !session) throw new Error("AUTH_REQUIRED");
+      const cleanText = stripStandaloneLineNumbers(selection.text);
+      const cleanContext = stripStandaloneLineNumbers(selection.context);
       const response = await functionRequest(
         kind === "translate" ? "translate" : "ai-explain",
         {
@@ -1330,13 +1535,13 @@ function App() {
           body: JSON.stringify(
             kind === "translate"
               ? {
-                  text: selection.text,
+                  text: cleanText,
                   sourceLanguage: "auto",
                   targetLanguage: "zh",
                 }
               : {
-                  selectedText: selection.text,
-                  nearbyContext: selection.context,
+                  selectedText: cleanText,
+                  nearbyContext: cleanContext,
                   documentContext: documentText.slice(0, 100000),
                   pageNumber: selection.pageNumber,
                   model,
@@ -1371,14 +1576,35 @@ function App() {
     }
   }
   function goToPage(page: number) {
-    if (!pdf || !Number.isInteger(page) || page < 1 || page > pdf.numPages) return;
-    setPageInput(String(page));
+    if (!pdf || !Number.isFinite(page)) return;
+    const target = Math.max(1, Math.min(pdf.numPages, Math.round(page)));
+    setPageInput(String(target));
     document
-      .getElementById(`pdf-page-${page}`)
+      .getElementById(`pdf-page-${target}`)
       ?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  function searchDocument() {
+    const query = searchQuery.trim();
+    if (!query) { setSearchNotice(""); return; }
+    const source = documentText.toLocaleLowerCase();
+    const needle = query.toLocaleLowerCase();
+    const index = source.indexOf(needle);
+    const count = source.split(needle).length - 1;
+    if (index < 0) { setSearchNotice("未找到匹配内容"); return; }
+    const pageMatches = [...source.slice(0, index).matchAll(/\[第\s*(\d+)\s*页\]/g)];
+    const page = Number(pageMatches.at(-1)?.[1] || 1);
+    goToPage(page);
+    setSearchNotice(`第 ${page} 页 · ${count} 个匹配`);
+  }
+  async function toggleFullscreen() {
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else await document.documentElement.requestFullscreen();
+    } catch { setSearchNotice("当前浏览器不支持全屏"); }
   }
   async function goToOutline(destination: unknown) {
     if (!pdf) return;
+    if (typeof destination === "number") { goToPage(destination); return; }
     const resolved =
       typeof destination === "string"
         ? await pdf.getDestination(destination)
@@ -1413,7 +1639,14 @@ function App() {
   }
 
   return (
-    <div className="app">
+    <div className="app quiet-reading">
+      {pdfOpening && <div className="ink-opening" role="status" aria-label="正在打开 PDF">
+        <div className="ink-opening-paper" />
+        <div className="ink-opening-wash" />
+        <div className="ink-opening-vignette" />
+        <div className="ink-drop"><i /><b /><em /></div>
+        <div className="ink-opening-wordmark"><img src="/brand/inkwise-mark.svg" alt="" /><span>墨知</span><small>正在展开阅读空间</small></div>
+      </div>}
       <header className="topbar">
         <div className="topbar-left">
           <IconButton
@@ -1431,10 +1664,10 @@ function App() {
         </div>
         {pdf && (
           <div className="topbar-center">
-            <button className="search-trigger" title="文档搜索将在下一阶段接入">
+            {searchOpen ? <form className="document-search" onSubmit={event => { event.preventDefault(); searchDocument(); }}><Search size={15}/><input autoFocus value={searchQuery} onChange={event => { setSearchQuery(event.target.value); setSearchNotice(""); }} placeholder="搜索文档"/><button type="button" aria-label="关闭搜索" onClick={() => { setSearchOpen(false); setSearchQuery(""); setSearchNotice(""); }}><X size={14}/></button>{searchNotice && <small>{searchNotice}</small>}</form> : <button className="search-trigger" title="搜索文档" onClick={() => setSearchOpen(true)}>
               <Search size={16} />
               搜索
-            </button>
+            </button>}
             <form className="page-jump" onSubmit={(event) => { event.preventDefault(); goToPage(Number(pageInput)); }}>
               <input aria-label="跳转页码" inputMode="numeric" value={pageInput} onChange={(event) => setPageInput(event.target.value.replace(/\D/g, ""))} onBlur={() => setPageInput(String(currentPage))} />
               <span>/ {pdf.numPages}</span>
@@ -1461,7 +1694,7 @@ function App() {
             <IconButton label={visualMode ? "退出图表框选" : "框选图片或表格"} active={visualMode} onClick={() => { setVisualMode(value => !value); setSelections([]); }}>
               <ScanLine size={17} />
             </IconButton>
-            <IconButton label="使用 MinerU 版面分析" onClick={runMineruLayout} active={layoutState.state === "processing" || layoutState.state === "done"}>
+            <IconButton label="智能版面分析" onClick={runMineruLayout} active={layoutState.state === "processing" || layoutState.state === "done"}>
               <ScanSearch size={17} />
             </IconButton>
           </div>
@@ -1471,15 +1704,18 @@ function App() {
             <FolderOpen size={16} />
             打开 PDF
             <input
-              ref={fileInput}
+              ref={readerFileInput}
               type="file"
               accept="application/pdf"
               onChange={(event) =>
-                event.target.files?.[0] && openFile(event.target.files[0])
+                event.target.files?.[0] && openFileInNewTab(event.target.files[0])
               }
             />
           </label>
-          <IconButton label="全屏">
+          <IconButton label="通过 URL 打开 PDF" onClick={() => { setPaperUrl(""); setUrlError(""); setUrlOpen(true); }}>
+            <Link size={16} />
+          </IconButton>
+          <IconButton label="切换全屏" onClick={toggleFullscreen}>
             <Maximize size={17} />
           </IconButton>
           <IconButton
@@ -1523,6 +1759,17 @@ function App() {
           )}
         </nav>
         <section className="viewer">
+          {layoutNoticeVisible && layoutState.state !== "idle" && <aside className={`layout-notice ${layoutState.state}${layoutNoticeOpen ? " open" : ""}`} aria-live="polite">
+            <button className="layout-notice-summary" type="button" onClick={() => setLayoutNoticeOpen(value => !value)} aria-expanded={layoutNoticeOpen}>
+              <ScanSearch size={16} />
+              <span>智能版面分析</span>
+              <ChevronDown size={15} />
+            </button>
+            <div className="layout-notice-content">
+              <div className="layout-status-line"><span>{layoutState.message}</span><b>{layoutState.progress ?? 0}%</b></div>
+              <div className="layout-progress" aria-hidden="true"><i style={{ width: `${layoutState.progress ?? 0}%` }} /></div>
+            </div>
+          </aside>}
           <div
             className="document-scroll"
             onWheel={(event) => {
@@ -1564,13 +1811,6 @@ function App() {
                   onVisible={(page) => { setCurrentPage(page); setPageInput(String(page)); }}
                 />
               ))}
-              <div className="page-pill">
-                第 {currentPage} / {pdf.numPages} 页
-              </div>
-              {layoutState.state !== "idle" && <div className={`layout-status ${layoutState.state}`} role="status">
-                <div className="layout-status-line"><ScanSearch size={15} /><span>{layoutState.message}</span><b>{layoutState.progress ?? 0}%</b></div>
-                <div className="layout-progress" aria-hidden="true"><i style={{ width: `${layoutState.progress ?? 0}%` }} /></div>
-              </div>}
           </div>
         </section>
         {panelOpen && (

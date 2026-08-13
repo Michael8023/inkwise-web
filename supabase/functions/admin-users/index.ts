@@ -14,6 +14,9 @@ function statusFor(message: string) {
   if (message === "AUTH_REQUIRED") return 401;
   if (message === "ADMIN_REQUIRED") return 403;
   if (message === "USER_NOT_FOUND") return 404;
+  if (message === "ADMIN_DELETE_FORBIDDEN") return 403;
+  if (message === "PLAN_NOT_FOUND") return 404;
+  if (message === "PLAN_NAME_EXISTS") return 409;
   return 400;
 }
 
@@ -40,7 +43,7 @@ Deno.serve(async req => {
       const limit = 30;
       const [{ data: users, error: usersError }, { data: plans, error: plansError }] = await Promise.all([
         db.rpc("admin_list_users", { p_search: search, p_limit: limit, p_offset: (page - 1) * limit }),
-        db.from("plans").select("id,name,monthly_credits").eq("is_active", true).order("monthly_credits"),
+        db.from("plans").select("id,name,monthly_credits,is_default").order("monthly_credits"),
       ]);
       if (usersError) throw usersError;
       if (plansError) throw plansError;
@@ -54,6 +57,24 @@ Deno.serve(async req => {
     }
     if (req.method === "POST") {
       const input = await body(req);
+      if (input.action === "savePlan") {
+        const planId = input.planId ? String(input.planId) : null;
+        const name = String(input.name || "");
+        const monthlyCredits = Number(input.monthlyCredits);
+        const isDefault = input.isDefault === true;
+        if ((planId && !/^[0-9a-f-]{36}$/i.test(planId)) || !Number.isSafeInteger(monthlyCredits)) {
+          throw new Error("INVALID_PLAN");
+        }
+        const { data, error } = await db.rpc("admin_save_plan", {
+          p_admin_user_id: currentUser.id,
+          p_plan_id: planId,
+          p_name: name,
+          p_monthly_credits: monthlyCredits,
+          p_is_default: isDefault,
+        });
+        if (error) throw error;
+        return json({ plan: data });
+      }
       const userId = String(input.userId || "");
       const operation = String(input.operation || "");
       const amount = Number(input.amount);
@@ -72,6 +93,22 @@ Deno.serve(async req => {
       });
       if (error) throw error;
       return json(data);
+    }
+    if (req.method === "DELETE") {
+      const input = await body(req);
+      const userId = String(input.userId || "");
+      const confirmation = String(input.confirmation || "").trim().toLowerCase();
+      if (!/^[0-9a-f-]{36}$/i.test(userId)) throw new Error("USER_NOT_FOUND");
+      if (userId === currentUser.id) throw new Error("ADMIN_DELETE_FORBIDDEN");
+      const { data: target, error: targetError } = await db.auth.admin.getUserById(userId);
+      if (targetError || !target.user) throw new Error("USER_NOT_FOUND");
+      if (!target.user.email || confirmation !== target.user.email.toLowerCase()) throw new Error("DELETE_CONFIRMATION_INVALID");
+      const { data: targetAdmin, error: targetAdminError } = await db.from("admin_users").select("user_id").eq("user_id", userId).maybeSingle();
+      if (targetAdminError) throw targetAdminError;
+      if (targetAdmin) throw new Error("ADMIN_DELETE_FORBIDDEN");
+      const { error: deleteError } = await db.auth.admin.deleteUser(userId);
+      if (deleteError) throw deleteError;
+      return json({ ok: true, userId });
     }
     return json({ error: "METHOD_NOT_ALLOWED" }, 405);
   } catch (error) {
