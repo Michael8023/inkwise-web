@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "inkwise-web",
+  "name": "inkwise-web-1",
   "compatibility_date": "2026-08-13",
   "assets": {
     "directory": "./dist",
