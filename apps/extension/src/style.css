@@ -511,6 +511,15 @@ button {
 .page-sheet.visual-select-mode .text-layer { pointer-events: none; user-select: none; }
 .visual-selection-draft, .visual-selection-area { position: absolute; z-index: 7; border: 1.5px solid var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); box-shadow: 0 0 0 1px rgb(255 255 255 / .75), 0 5px 18px rgb(33 22 73 / .14); pointer-events: none; }
 .visual-selection-draft { border-style: dashed; }
+.auto-visual-regions { position: absolute; z-index: 6; inset: 0; pointer-events: none; }
+.auto-visual-region { position: absolute; border: 1.5px dashed transparent; background: transparent; pointer-events: auto; transition: border-color .13s ease, background .13s ease, box-shadow .13s ease; }
+.auto-visual-region.active { border-color: color-mix(in srgb, var(--accent) 86%, #fff); background: color-mix(in srgb, var(--accent) 5%, transparent); box-shadow: 0 0 0 2px rgb(255 255 255 / .7), 0 5px 18px rgb(28 23 54 / .16); }
+.auto-visual-actions { position: absolute; top: 5px; right: 5px; display: flex; align-items: center; gap: 4px; opacity: 0; transform: translateY(-3px); border: 1px solid rgb(255 255 255 / .7); border-radius: 6px; background: rgb(27 31 38 / .9); color: #fff; padding: 3px; box-shadow: 0 5px 16px rgb(0 0 0 / .22); backdrop-filter: blur(8px); transition: opacity .13s ease, transform .13s ease; pointer-events: none; }
+.auto-visual-region.active .auto-visual-actions { opacity: 1; transform: translateY(0); pointer-events: auto; }
+.auto-visual-actions span { padding: 0 5px; color: #d7ddd9; font-size: 9px; }
+.auto-visual-actions button { width: 25px; height: 25px; display: grid; place-items: center; border: 0; border-radius: 4px; background: transparent; color: #f4f7f6; padding: 0; cursor: pointer; }
+.auto-visual-actions button:hover { background: var(--accent); color: #fff; }
+.page-sheet.visual-select-mode .auto-visual-regions { display: none; }
 .text-layer {
   position: absolute;
   inset: 0;

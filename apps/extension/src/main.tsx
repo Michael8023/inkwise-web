@@ -71,11 +71,98 @@ type VisualSelection = {
   area: { x: number; y: number; width: number; height: number };
   task?: { kind: "explain" | "table"; state: "loading" | "done" | "error"; result?: string };
 };
+type VisualRegion = {
+  id: string;
+  kind: "image" | "table";
+  area: { x: number; y: number; width: number; height: number };
+};
 type Tab = "summary" | "chat" | "history";
 type OutlineItem = { title: string; dest?: unknown; items?: OutlineItem[] };
 type ChatMessage = { role: "user" | "assistant"; content: string };
 type AuthSession = { user: { id: string; email?: string; user_metadata?: Record<string, unknown> } };
 type Usage = { plan: string; creditsRemaining: number; periodEnd: string | null };
+
+function cropPdfCanvas(source: HTMLCanvasElement, area: VisualRegion["area"]) {
+  const sx = Math.round(area.x * source.width), sy = Math.round(area.y * source.height);
+  const sw = Math.max(1, Math.round(area.width * source.width)), sh = Math.max(1, Math.round(area.height * source.height));
+  const ratio = Math.min(1, 1600 / Math.max(sw, sh));
+  const crop = document.createElement("canvas");
+  crop.width = Math.max(1, Math.round(sw * ratio)); crop.height = Math.max(1, Math.round(sh * ratio));
+  crop.getContext("2d")?.drawImage(source, sx, sy, sw, sh, 0, 0, crop.width, crop.height);
+  return crop.toDataURL("image/jpeg", .9);
+}
+
+async function copyImageDataUrl(dataUrl: string) {
+  if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined") throw new Error("CLIPBOARD_UNAVAILABLE");
+  const image = new Image();
+  await new Promise<void>((resolve, reject) => { image.onload = () => resolve(); image.onerror = () => reject(new Error("IMAGE_INVALID")); image.src = dataUrl; });
+  const canvas = document.createElement("canvas"); canvas.width = image.naturalWidth; canvas.height = image.naturalHeight;
+  canvas.getContext("2d")?.drawImage(image, 0, 0);
+  const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(value => value ? resolve(value) : reject(new Error("IMAGE_INVALID")), "image/png"));
+  await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+}
+
+function overlapRatio(a: VisualRegion["area"], b: VisualRegion["area"]) {
+  const width = Math.max(0, Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x));
+  const height = Math.max(0, Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y));
+  return width * height / Math.max(.0001, Math.min(a.width * a.height, b.width * b.height));
+}
+
+async function detectPageVisualRegions(page: any, viewport: any, textContent: any): Promise<VisualRegion[]> {
+  type VisualCell = { x: number; y: number; width: number; height: number };
+  const regions: VisualRegion[] = [];
+  const operatorList = await page.getOperatorList();
+  const stack: number[][] = [];
+  let matrix = [1, 0, 0, 1, 0, 0];
+  const transform = (first: number[], second: number[]) => pdfjsLib.Util.transform(first, second);
+  const addBounds = (kind: VisualRegion["kind"], points: Array<[number, number]>) => {
+    const xs = points.map(point => point[0]), ys = points.map(point => point[1]);
+    const left = Math.max(0, Math.min(...xs)), top = Math.max(0, Math.min(...ys));
+    const right = Math.min(viewport.width, Math.max(...xs)), bottom = Math.min(viewport.height, Math.max(...ys));
+    const area = { x: left / viewport.width, y: top / viewport.height, width: (right - left) / viewport.width, height: (bottom - top) / viewport.height };
+    if (area.width < .08 || area.height < .045 || area.width * area.height < .008 || area.width > .98 && area.height > .98) return;
+    if (!regions.some(region => overlapRatio(region.area, area) > .82)) regions.push({ id: crypto.randomUUID(), kind, area });
+  };
+  for (let index = 0; index < operatorList.fnArray.length; index += 1) {
+    const fn = operatorList.fnArray[index], args = operatorList.argsArray[index] || [];
+    if (fn === pdfjsLib.OPS.save) stack.push([...matrix]);
+    else if (fn === pdfjsLib.OPS.restore) matrix = stack.pop() || [1, 0, 0, 1, 0, 0];
+    else if (fn === pdfjsLib.OPS.transform) matrix = transform(matrix, args as number[]);
+    else if ([pdfjsLib.OPS.paintImageXObject, pdfjsLib.OPS.paintInlineImageXObject, pdfjsLib.OPS.paintImageMaskXObject].includes(fn)) {
+      const combined = transform(viewport.transform, matrix);
+      const point = (x: number, y: number) => pdfjsLib.Util.applyTransform([x, y], combined) as [number, number];
+      addBounds("image", [point(0, 0), point(1, 0), point(0, 1), point(1, 1)]);
+    }
+  }
+
+  const cells: VisualCell[] = textContent.items.filter((item: any) => item.str?.trim()).map((item: any): VisualCell => {
+    const value = transform(viewport.transform, item.transform);
+    return { x: value[4], y: value[5], width: Math.max(4, item.width * viewport.scale), height: Math.max(5, Math.abs(value[3]) || 10) };
+  }).sort((a: any, b: any) => a.y - b.y || a.x - b.x);
+  const rows: VisualCell[][] = [];
+  for (const cell of cells) {
+    const row = rows.find(items => Math.abs(items[0].y - cell.y) <= Math.max(3, cell.height * .45));
+    if (row) row.push(cell); else rows.push([cell]);
+  }
+  const candidates = rows.filter(row => row.length >= 3).sort((a, b) => a[0].y - b[0].y);
+  let group: VisualCell[][] = [];
+  const flush = () => {
+    if (group.length < 3) { group = []; return; }
+    const columnHits = new Map<number, number>();
+    group.forEach(row => new Set<number>(row.map((cell: VisualCell) => Math.round(cell.x / 18))).forEach((column: number) => columnHits.set(column, (columnHits.get(column) || 0) + 1)));
+    if ([...columnHits.values()].filter(count => count >= Math.ceil(group.length * .6)).length < 2) { group = []; return; }
+    const all = group.flat(); const pad = 7;
+    addBounds("table", [[Math.min(...all.map(cell => cell.x)) - pad, Math.min(...all.map(cell => cell.y - cell.height)) - pad], [Math.max(...all.map(cell => cell.x + cell.width)) + pad, Math.max(...all.map(cell => cell.y)) + pad]]);
+    group = [];
+  };
+  for (const row of candidates) {
+    const previous = group.at(-1);
+    if (previous && row[0].y - previous[0].y > Math.max(28, previous[0].height * 2.8)) flush();
+    group.push(row);
+  }
+  flush();
+  return regions.filter(region => !regions.some(other => other.id !== region.id && other.kind === "image" && region.kind === "table" && overlapRatio(region.area, other.area) > .75));
+}
 const apiErrors: Record<string, string> = {
   AUTH_REQUIRED: "请先登录后使用 AI 功能。",
   QUOTA_EXCEEDED: "AI 额度不足，请联系管理员充值。",
@@ -387,14 +474,16 @@ function SelectionPopover({
   );
 }
 
-function VisualPopover({ selection, pageRef, onClose, onTask }: {
+function VisualPopover({ selection, pageRef, onClose, onTask, onFollowup }: {
   selection: VisualSelection;
   pageRef: React.RefObject<HTMLDivElement | null>;
   onClose: (id: string) => void;
   onTask: (selection: VisualSelection, kind: "explain" | "table") => void;
+  onFollowup?: (selection: VisualSelection, question: string) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState({ left: -9999, top: -9999 });
+  const [followup, setFollowup] = useState("");
   useLayoutEffect(() => {
     const update = () => {
       const page = pageRef.current, popover = ref.current;
@@ -412,8 +501,7 @@ function VisualPopover({ selection, pageRef, onClose, onTask }: {
     return () => { scroller?.removeEventListener("scroll", update); window.removeEventListener("resize", update); observer.disconnect(); };
   }, [pageRef, selection.area, selection.task]);
   async function copyImage() {
-    const blob = await (await fetch(selection.imageDataUrl)).blob();
-    if (navigator.clipboard?.write && typeof ClipboardItem !== "undefined") await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
+    await copyImageDataUrl(selection.imageDataUrl);
   }
   return <div ref={ref} className="selection-popover visual-popover" style={position} onMouseDown={event => event.stopPropagation()} role="dialog" aria-label="图表操作">
     <button className="popover-close" aria-label="关闭" onClick={() => onClose(selection.id)}><X size={15}/></button>
@@ -421,6 +509,7 @@ function VisualPopover({ selection, pageRef, onClose, onTask }: {
     <img src={selection.imageDataUrl} alt="框选的 PDF 区域"/>
     <div className="popover-actions visual-actions"><button onClick={() => onTask(selection, "explain")} disabled={selection.task?.state === "loading"}><ImageIcon size={14}/>AI 解读</button><button onClick={() => onTask(selection, "table")} disabled={selection.task?.state === "loading"}><Table2 size={14}/>提取表格</button><button title="复制图片" onClick={() => copyImage().catch(() => undefined)}><Copy size={14}/></button><a title="下载图片" href={selection.imageDataUrl} download={`inkwise-page-${selection.pageNumber}.jpg`}><Download size={14}/></a></div>
     {selection.task && <div className={`popover-result ${selection.task.state}`}>{selection.task.state === "loading" ? "正在理解图表…" : <><ReactMarkdown>{selection.task.result || ""}</ReactMarkdown>{selection.task.state === "done" && <button className="visual-copy-result" onClick={() => navigator.clipboard.writeText(selection.task?.result || "")}><Copy size={13}/>复制结果</button>}</>}</div>}
+    {selection.task?.kind === "explain" && selection.task.state === "done" && <form className="explain-followup" onSubmit={event => { event.preventDefault(); const value=followup.trim(); if (!value || !onFollowup) return; onFollowup(selection,value); setFollowup(""); }}><input value={followup} onChange={event => setFollowup(event.target.value)} placeholder="继续追问这张图…"/><button disabled={!followup.trim()}><Send size={14}/></button></form>}
   </div>;
 }
 
@@ -442,6 +531,7 @@ function PageView({
   onVisualSelect,
   onVisualClose,
   onVisualTask,
+  onVisualFollowup,
   onVisible,
 }: {
   pdf: any;
@@ -458,9 +548,10 @@ function PageView({
   onDeleteHighlight: (id: string) => void;
   visualMode: boolean;
   visualSelections: VisualSelection[];
-  onVisualSelect: (selection: Omit<VisualSelection, "id">) => void;
+  onVisualSelect: (selection: Omit<VisualSelection, "id">) => VisualSelection;
   onVisualClose: (id: string) => void;
   onVisualTask: (selection: VisualSelection, kind: "explain" | "table") => void;
+  onVisualFollowup: (selection: VisualSelection, question: string) => void;
   onVisible: (page: number) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -472,6 +563,8 @@ function PageView({
   const [activeHighlight, setActiveHighlight] = useState<{ id: string; area: { x: number; y: number; width: number; height: number } } | null>(null);
   const highlightHideTimer = useRef<number | null>(null);
   const [visualDraft, setVisualDraft] = useState<{ startX: number; startY: number; x: number; y: number; width: number; height: number } | null>(null);
+  const [visualRegions, setVisualRegions] = useState<VisualRegion[]>([]);
+  const [activeVisualRegion, setActiveVisualRegion] = useState<string | null>(null);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -510,6 +603,7 @@ function PageView({
         .map((item: any) => item.str)
         .join(" ");
       setPageText(extractedText);
+      detectPageVisualRegions(page, viewport, textContent).then(regions => { if (!cancelled) setVisualRegions(regions); }).catch(() => { if (!cancelled) setVisualRegions([]); });
       if (cancelled) return;
       await page.render({
         canvasContext: canvas.getContext("2d")!,
@@ -600,14 +694,16 @@ function PageView({
     const area = { x: visualDraft.x, y: visualDraft.y, width: visualDraft.width, height: visualDraft.height };
     setVisualDraft(null);
     if (area.width < 0.025 || area.height < 0.025) return;
-    const source = canvasRef.current;
-    const sx = Math.round(area.x * source.width), sy = Math.round(area.y * source.height);
-    const sw = Math.max(1, Math.round(area.width * source.width)), sh = Math.max(1, Math.round(area.height * source.height));
-    const ratio = Math.min(1, 1600 / Math.max(sw, sh));
-    const crop = document.createElement("canvas");
-    crop.width = Math.max(1, Math.round(sw * ratio)); crop.height = Math.max(1, Math.round(sh * ratio));
-    crop.getContext("2d")?.drawImage(source, sx, sy, sw, sh, 0, 0, crop.width, crop.height);
-    onVisualSelect({ pageNumber, imageDataUrl: crop.toDataURL("image/jpeg", .88), pageContext: pageText, area });
+    onVisualSelect({ pageNumber, imageDataUrl: cropPdfCanvas(canvasRef.current, area), pageContext: pageText, area });
+  }
+  function createSelectionFromRegion(region: VisualRegion) {
+    const canvas = canvasRef.current; if (!canvas) return;
+    const selection = { pageNumber, imageDataUrl: cropPdfCanvas(canvas, region.area), pageContext: pageText, area: region.area };
+    return onVisualSelect(selection);
+  }
+  async function copyVisualRegion(region: VisualRegion) {
+    const canvas = canvasRef.current; if (!canvas) return;
+    await copyImageDataUrl(cropPdfCanvas(canvas, region.area));
   }
   function detectHighlight(event: React.MouseEvent<HTMLDivElement>) {
     const page = hostRef.current;
@@ -660,6 +756,7 @@ function PageView({
         <canvas ref={canvasRef} />
         <div className="text-layer" ref={layerRef} />
         {visualDraft && <div className="visual-selection-draft" style={{ left: `${visualDraft.x * 100}%`, top: `${visualDraft.y * 100}%`, width: `${visualDraft.width * 100}%`, height: `${visualDraft.height * 100}%` }} />}
+        <div className="auto-visual-regions" aria-label="自动识别的图片和表格">{visualRegions.map(region => <div key={region.id} className={`auto-visual-region ${region.kind}${activeVisualRegion === region.id ? " active" : ""}`} style={{ left: `${region.area.x * 100}%`, top: `${region.area.y * 100}%`, width: `${region.area.width * 100}%`, height: `${region.area.height * 100}%` }} onMouseEnter={() => setActiveVisualRegion(region.id)} onMouseLeave={() => setActiveVisualRegion(current => current === region.id ? null : current)}><div className="auto-visual-actions"><span>{region.kind === "table" ? "表格" : "图片"}</span><button title="复制" aria-label="复制图片" onClick={event => { event.stopPropagation(); copyVisualRegion(region).catch(() => undefined); }}><Copy size={13}/></button><button title="结合论文解释" aria-label="解释图片" onClick={event => { event.stopPropagation(); const selection=createSelectionFromRegion(region); if (selection) onVisualTask(selection,"explain"); }}><Sparkles size={13}/></button></div></div>)}</div>
         {visualSelections.map(selection => <div key={selection.id} className="visual-selection-area" style={{ left: `${selection.area.x * 100}%`, top: `${selection.area.y * 100}%`, width: `${selection.area.width * 100}%`, height: `${selection.area.height * 100}%` }} />)}
         <div className="temporary-selection-layer" aria-hidden="true">
           {selections.flatMap((selection) => selection.highlights.map((highlight, index) => (
@@ -695,7 +792,7 @@ function PageView({
             onHighlight={onHighlight}
           />
         ))}
-        {visualSelections.map(selection => <VisualPopover key={selection.id} selection={selection} pageRef={hostRef} onClose={onVisualClose} onTask={onVisualTask}/>)}
+        {visualSelections.map(selection => <VisualPopover key={selection.id} selection={selection} pageRef={hostRef} onClose={onVisualClose} onTask={onVisualTask} onFollowup={onVisualFollowup}/>)}
       </div>
     </div>
   );
@@ -997,8 +1094,10 @@ function App() {
     if (highlightMode) persistHighlight(next);
   }
   function addVisualSelection(selection: Omit<VisualSelection, "id">) {
-    setVisualSelections(items => [...items, { ...selection, id: crypto.randomUUID() }]);
+    const next = { ...selection, id: crypto.randomUUID() };
+    setVisualSelections(items => [...items, next]);
     setVisualMode(false);
+    return next;
   }
   async function runVisualTask(selection: VisualSelection, kind: "explain" | "table") {
     setVisualSelections(items => items.map(item => item.id === selection.id ? { ...item, task: { kind, state: "loading" } } : item));
@@ -1010,6 +1109,19 @@ function App() {
       setVisualSelections(items => items.map(item => item.id === selection.id ? { ...item, task: { kind, state: "done", result: result.text } } : item));
     } catch (error) {
       setVisualSelections(items => items.map(item => item.id === selection.id ? { ...item, task: { kind, state: "error", result: readableApiError(error, "图表理解失败，请稍后重试。") } } : item));
+    }
+  }
+  async function followupVisualExplanation(selection: VisualSelection, question: string) {
+    const previous = selection.task?.result || "";
+    setVisualSelections(items => items.map(item => item.id === selection.id ? { ...item, task: { kind: "explain", state: "loading", result: previous } } : item));
+    try {
+      const response = await functionRequest("ai-visual", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind: "explain", imageDataUrl: selection.imageDataUrl, pageContext: selection.pageContext, documentContext: documentText.slice(0, 30000), previousExplanation: previous, question, pageNumber: selection.pageNumber, model, requestId: crypto.randomUUID() }) });
+      const result = await response.json();
+      if (!response.ok || !result.text) throw new Error(result.error || "AI_VISUAL_FAILED");
+      if (typeof result.creditsRemaining === "number") setUsage(current => current ? { ...current, creditsRemaining: result.creditsRemaining } : current);
+      setVisualSelections(items => items.map(item => item.id === selection.id ? { ...item, task: { kind: "explain", state: "done", result: result.text } } : item));
+    } catch (error) {
+      setVisualSelections(items => items.map(item => item.id === selection.id ? { ...item, task: { kind: "explain", state: "error", result: readableApiError(error, "追问失败，请稍后重试。") } } : item));
     }
   }
   function persistHighlight(selection: Selection) {
@@ -1302,6 +1414,7 @@ function App() {
                   onVisualSelect={addVisualSelection}
                   onVisualClose={(id) => setVisualSelections(items => items.filter(item => item.id !== id))}
                   onVisualTask={runVisualTask}
+                  onVisualFollowup={followupVisualExplanation}
                   onVisible={(page) => { setCurrentPage(page); setPageInput(String(page)); }}
                 />
               ))}
