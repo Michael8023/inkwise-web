@@ -79,7 +79,7 @@ type VisualRegion = {
   area: { x: number; y: number; width: number; height: number };
   pageNumber?: number;
 };
-type LayoutState = { state: "idle" | "preparing" | "uploading" | "processing" | "done" | "error"; message?: string };
+type LayoutState = { state: "idle" | "preparing" | "uploading" | "processing" | "downloading" | "done" | "error"; message?: string; progress?: number };
 type Tab = "summary" | "chat" | "history";
 type OutlineItem = { title: string; dest?: unknown; items?: OutlineItem[] };
 type ChatMessage = { role: "user" | "assistant"; content: string };
@@ -879,6 +879,7 @@ function App() {
   const [mineruRegions, setMineruRegions] = useState<VisualRegion[]>([]);
   const [layoutState, setLayoutState] = useState<LayoutState>({ state: "idle" });
   const pdfBytes = useRef<ArrayBuffer | null>(null);
+  const autoLayoutDocument = useRef("");
   const fileInput = useRef<HTMLInputElement>(null);
   const [documentId, setDocumentId] = useState("");
   const [documentText, setDocumentText] = useState("");
@@ -947,6 +948,11 @@ function App() {
     if (!session) { setUsage(null); return; }
     refreshUsage();
   }, [session]);
+  useEffect(() => {
+    if (!session || !documentReady || !documentId || autoLayoutDocument.current === documentId) return;
+    autoLayoutDocument.current = documentId;
+    void runMineruLayout();
+  }, [session, documentReady, documentId]);
   useEffect(() => {
     const onMove = (event: MouseEvent) => {
       if (!panelResize.current) return;
@@ -1041,7 +1047,7 @@ function App() {
 
   async function openPdfData(data: ArrayBuffer, name: string) {
     try {
-      setSelections([]); setHighlights([]); setVisualSelections([]); setVisualMode(false); setMineruRegions([]); setLayoutState({ state: "idle" });
+      setSelections([]); setHighlights([]); setVisualSelections([]); setVisualMode(false); setMineruRegions([]); setLayoutState({ state: "idle" }); autoLayoutDocument.current = "";
       setDocumentReady(false);
       setFileName(name);
       pdfBytes.current = data.slice(0);
@@ -1076,25 +1082,37 @@ function App() {
     await openPdfData(await file.arrayBuffer(), file.name);
   }
   async function runMineruLayout() {
-    if (!pdf || !pdfBytes.current || layoutState.state === "preparing" || layoutState.state === "uploading" || layoutState.state === "processing") return;
+    if (!pdf || !pdfBytes.current || layoutState.state === "preparing" || layoutState.state === "uploading" || layoutState.state === "processing" || layoutState.state === "downloading") return;
     try {
-      setLayoutState({ state: "uploading", message: "正在通过安全通道上传 PDF…" });
-      // HTTP header values must be Latin-1; encode non-ASCII PDF filenames before upload.
-      const safeFileName = encodeURIComponent(fileName || "document.pdf");
-      const uploadResponse = await functionRequest("mineru-upload", { method: "POST", headers: { "Content-Type": "application/pdf", "X-File-Name": safeFileName }, body: pdfBytes.current });
-      const uploaded = await uploadResponse.json(); if (!uploadResponse.ok) throw new Error(uploaded.error || "MINERU_UPLOAD_FAILED");
-      setLayoutState({ state: "processing", message: "MinerU 正在识别图表与表格…" });
+      const bytes = pdfBytes.current;
+      setLayoutState({ state: "preparing", message: "正在创建 MinerU 分析任务…", progress: 4 });
+      const preparedResponse = await functionRequest("mineru-layout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "prepare", name: fileName || "document.pdf" }) });
+      const prepared = await preparedResponse.json(); if (!preparedResponse.ok) throw new Error(prepared.error || "MINERU_PREPARE_FAILED");
+      setLayoutState({ state: "uploading", message: "正在上传 PDF 到 MinerU…", progress: 8 });
+      await new Promise<void>((resolve, reject) => {
+        const request = new XMLHttpRequest();
+        request.open("PUT", prepared.uploadUrl);
+        request.upload.onprogress = event => {
+          if (event.lengthComputable) setLayoutState({ state: "uploading", message: `正在上传 PDF 到 MinerU… ${Math.round(event.loaded / event.total * 100)}%`, progress: 8 + Math.round(event.loaded / event.total * 32) });
+        };
+        request.onerror = () => reject(new Error("MINERU_BROWSER_UPLOAD_FAILED"));
+        request.onload = () => request.status >= 200 && request.status < 300 ? resolve() : reject(new Error(`MINERU_UPLOAD_FAILED_${request.status}`));
+        request.send(bytes);
+      });
+      setLayoutState({ state: "processing", message: "MinerU 正在识别图表与表格…", progress: 40 });
       let status: any;
       for (let attempt = 0; attempt < 60; attempt += 1) {
         await new Promise(resolve => window.setTimeout(resolve, 3000));
-        const statusResponse = await functionRequest("mineru-layout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "status", batchId: uploaded.batchId }) });
+        const statusResponse = await functionRequest("mineru-layout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "status", batchId: prepared.batchId }) });
         status = await statusResponse.json(); if (!statusResponse.ok) throw new Error(status.error || "MINERU_STATUS_FAILED");
         if (status.state === "done" || status.state === "failed") break;
-        const progress = status.progress; setLayoutState({ state: "processing", message: progress?.total_pages ? `MinerU 正在解析 ${progress.extracted_pages || 0}/${progress.total_pages} 页…` : "MinerU 正在识别图表与表格…" });
+        const progress = status.progress;
+        const parsed = progress?.total_pages ? Math.min(94, 40 + Math.round(54 * (progress.extracted_pages || 0) / progress.total_pages)) : Math.min(90, 43 + attempt);
+        setLayoutState({ state: "processing", message: progress?.total_pages ? `MinerU 正在解析 ${progress.extracted_pages || 0}/${progress.total_pages} 页…` : "MinerU 正在识别图表与表格…", progress: parsed });
       }
       if (status?.state !== "done" || !status.ready) throw new Error(status?.error || "MINERU_TIMEOUT");
-      setLayoutState({ state: "processing", message: "正在获取 MinerU 版面结果…" });
-      const zipResponse = await functionRequest("mineru-layout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "download", batchId: uploaded.batchId }) });
+      setLayoutState({ state: "downloading", message: "正在获取 MinerU 版面结果…", progress: 96 });
+      const zipResponse = await functionRequest("mineru-layout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "download", batchId: prepared.batchId }) });
       if (!zipResponse.ok) {
         const result = await zipResponse.json().catch(() => ({}));
         throw new Error(result.error || "MINERU_RESULT_DOWNLOAD_FAILED");
@@ -1105,7 +1123,7 @@ function App() {
       const sizes = await Promise.all(Array.from({ length: pdf.numPages }, (_, index) => pdf.getPage(index + 1).then((page: any) => { const viewport = page.getViewport({ scale: 1 }); return { width: viewport.width, height: viewport.height }; })));
       const regions = raw.flatMap((value: unknown) => collectMineruRegions(value, sizes));
       if (!regions.length) throw new Error("MINERU_LAYOUT_EMPTY");
-      setMineruRegions(regions); setLayoutState({ state: "done", message: `已识别 ${regions.filter((item: VisualRegion) => item.kind === "image").length} 张图片和 ${regions.filter((item: VisualRegion) => item.kind === "table").length} 个表格` });
+      setMineruRegions(regions); setLayoutState({ state: "done", message: `已识别 ${regions.filter((item: VisualRegion) => item.kind === "image").length} 张图片和 ${regions.filter((item: VisualRegion) => item.kind === "table").length} 个表格`, progress: 100 });
     } catch (error) {
       const message = error instanceof Error ? error.message : "MINERU_REQUEST_FAILED";
       setLayoutState({ state: "error", message: message.includes("MINERU_API_TOKEN_NOT_CONFIGURED") ? "尚未配置 MinerU Token，仍使用本地识别。" : `MinerU 版面分析失败：${message}` });
@@ -1531,7 +1549,10 @@ function App() {
               <div className="page-pill">
                 第 {currentPage} / {pdf.numPages} 页
               </div>
-              {layoutState.state !== "idle" && <div className={`layout-status ${layoutState.state}`}>{layoutState.message}</div>}
+              {layoutState.state !== "idle" && <div className={`layout-status ${layoutState.state}`} role="status">
+                <div className="layout-status-line"><ScanSearch size={15} /><span>{layoutState.message}</span><b>{layoutState.progress ?? 0}%</b></div>
+                <div className="layout-progress" aria-hidden="true"><i style={{ width: `${layoutState.progress ?? 0}%` }} /></div>
+              </div>}
           </div>
         </section>
         {panelOpen && (

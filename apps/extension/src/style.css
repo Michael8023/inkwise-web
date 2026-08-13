@@ -614,10 +614,17 @@ button {
   font-size: 12px;
   color: var(--text-secondary);
 }
-.layout-status { position: sticky; bottom: 14px; z-index: 4; max-width: min(520px, calc(100% - 24px)); margin: 0 auto 14px; border: 1px solid var(--border); border-radius: 7px; background: color-mix(in srgb, var(--surface) 92%, transparent); box-shadow: var(--shadow-md); backdrop-filter: blur(10px); color: var(--text-secondary); padding: 8px 11px; font-size: 12px; text-align: center; }
-.layout-status.processing, .layout-status.uploading, .layout-status.preparing { border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); color: var(--accent); }
+.layout-status { position: sticky; bottom: 14px; z-index: 4; width: min(520px, calc(100% - 24px)); margin: 0 auto 14px; border: 1px solid var(--border); border-radius: 9px; background: color-mix(in srgb, var(--surface) 92%, transparent); box-shadow: var(--shadow-md); backdrop-filter: blur(10px); color: var(--text-secondary); padding: 10px 12px; font-size: 12px; }
+.layout-status-line { display: flex; align-items: center; gap: 8px; text-align: left; }
+.layout-status-line span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.layout-status-line b { font-variant-numeric: tabular-nums; font-size: 11px; }
+.layout-progress { height: 4px; overflow: hidden; border-radius: 999px; margin-top: 9px; background: color-mix(in srgb, var(--border) 65%, transparent); }
+.layout-progress i { display: block; height: 100%; min-width: 4px; border-radius: inherit; background: var(--accent); transition: width .35s ease; }
+.layout-status.processing, .layout-status.uploading, .layout-status.preparing, .layout-status.downloading { border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); color: var(--accent); }
 .layout-status.done { border-color: color-mix(in srgb, #299970 35%, var(--border)); color: #187456; }
+.layout-status.done .layout-progress i { background: #299970; }
 .layout-status.error { border-color: color-mix(in srgb, var(--danger) 30%, var(--border)); color: var(--danger); }
+.layout-status.error .layout-progress i { background: var(--danger); }
 .selection-popover {
   position: fixed;
   z-index: 10;
