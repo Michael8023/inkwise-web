@@ -1079,7 +1079,9 @@ function App() {
     if (!pdf || !pdfBytes.current || layoutState.state === "preparing" || layoutState.state === "uploading" || layoutState.state === "processing") return;
     try {
       setLayoutState({ state: "uploading", message: "正在通过安全通道上传 PDF…" });
-      const uploadResponse = await functionRequest("mineru-upload", { method: "POST", headers: { "Content-Type": "application/pdf", "X-File-Name": fileName || "document.pdf" }, body: pdfBytes.current });
+      // HTTP header values must be Latin-1; encode non-ASCII PDF filenames before upload.
+      const safeFileName = encodeURIComponent(fileName || "document.pdf");
+      const uploadResponse = await functionRequest("mineru-upload", { method: "POST", headers: { "Content-Type": "application/pdf", "X-File-Name": safeFileName }, body: pdfBytes.current });
       const uploaded = await uploadResponse.json(); if (!uploadResponse.ok) throw new Error(uploaded.error || "MINERU_UPLOAD_FAILED");
       setLayoutState({ state: "processing", message: "MinerU 正在识别图表与表格…" });
       let status: any;

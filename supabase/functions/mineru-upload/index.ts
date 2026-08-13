@@ -16,7 +16,10 @@ Deno.serve(async req => {
     if (declaredSize > maxBytes) throw new Error("MINERU_FILE_TOO_LARGE");
     const bytes = new Uint8Array(await req.arrayBuffer());
     if (!bytes.length || bytes.length > maxBytes) throw new Error("MINERU_FILE_TOO_LARGE");
-    const name = (req.headers.get("x-file-name") || "document.pdf").replace(/[^\w.\-() ]/g, "_").slice(0, 120);
+    const encodedName = req.headers.get("x-file-name") || "document.pdf";
+    let decodedName = encodedName;
+    try { decodedName = decodeURIComponent(encodedName); } catch { /* Keep a malformed header value safe. */ }
+    const name = decodedName.replace(/[^\w.\-() ]/g, "_").slice(0, 120);
     if (!name.toLowerCase().endsWith(".pdf")) throw new Error("PDF_REQUIRED");
     const preparedResponse = await fetch("https://mineru.net/api/v4/file-urls/batch", { method: "POST", headers: headers(), body: JSON.stringify({ files: [{ name, data_id: crypto.randomUUID() }], model_version: "vlm" }) });
     const prepared = await preparedResponse.json();
@@ -30,4 +33,3 @@ Deno.serve(async req => {
     return json({ error: message }, status);
   }
 });
-
