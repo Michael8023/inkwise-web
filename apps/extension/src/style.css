@@ -131,6 +131,12 @@ button {
 .auth-tabs button { border: 0; border-radius: 7px; padding: 8px; background: transparent; color: var(--text-secondary); cursor: pointer; font-size: 13px; }
 .auth-tabs button.active { background: var(--surface); color: var(--accent); box-shadow: var(--shadow-sm); font-weight: 650; }
 .auth-fields { display: grid; gap: 13px; }
+.verification-fields { gap: 15px; }
+.verification-fields > p { margin: 0; color: var(--text-secondary); font-size: 13px; line-height: 1.55; }
+.verification-fields > p strong { color: var(--text); font-weight: 650; }
+.verification-code { letter-spacing: .5em; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 19px; font-weight: 700; text-align: center; }
+.auth-inline-action { justify-self: start; border: 0; background: transparent; color: var(--accent); padding: 0; font-size: 12px; cursor: pointer; }
+.auth-inline-action:hover { text-decoration: underline; }
 .auth-fields label { display: grid; gap: 6px; color: var(--text-secondary); font-size: 12px; font-weight: 600; }
 .auth-dialog input { width: 100%; min-height: 44px; border: 1px solid var(--border); border-radius: 9px; background: rgba(255,255,255,.55); padding: 11px 12px; color: var(--text); transition: border-color .16s ease, box-shadow .16s ease, background .16s ease; }
 :root[data-theme="dark"] .auth-dialog input { background: rgba(11,13,20,.35); }

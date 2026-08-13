@@ -70,28 +70,39 @@ const apiErrors: Record<string, string> = {
   CONTEXT_TOO_LARGE: "文档内容过长，暂时无法提交给 AI。",
   RATE_LIMITED: "请求过于频繁，请稍后再试。",
   SUPABASE_NOT_CONFIGURED: "尚未配置 Supabase 项目。",
+  EMAIL_INVALID: "请输入有效的邮箱地址。",
+  USERNAME_INVALID: "用户名需为 3 至 24 个字符，只能包含文字、数字、下划线或短横线。",
+  USERNAME_TAKEN: "该用户名已被使用。",
+  EMAIL_ALREADY_REGISTERED: "该邮箱已注册，请直接登录。",
+  CODE_COOLDOWN: "发送过于频繁，请一分钟后重试。",
+  CODE_RATE_LIMITED: "验证码请求次数过多，请一小时后重试。",
+  CODE_INVALID: "验证码不正确。",
+  CODE_EXPIRED: "验证码已过期，请重新发送。",
+  CODE_USED: "验证码已使用，请重新获取。",
+  CODE_ATTEMPTS_EXCEEDED: "错误次数过多，请重新获取验证码。",
+  EMAIL_SEND_FAILED: "验证邮件发送失败，请稍后重试。",
+  PASSWORD_INVALID: "密码长度需为 8 至 72 位。",
 };
 function readableApiError(error: unknown, fallback: string) { const code=error instanceof Error?error.message:String(error||""); return apiErrors[code]||fallback; }
 
 function AuthDialog({
-  mode, email, password, name, error, notice, onClose, onSubmit, onModeChange, onEmail, onPassword, onName,
+  mode, email, password, name, code, error, notice, verifying, onClose, onSubmit, onVerify, onResend, onModeChange, onEmail, onPassword, onName, onCode,
 }: {
-  mode: "login" | "register"; email: string; password: string; name: string; error: string; notice: string;
-  onClose: () => void; onSubmit: () => void; onModeChange: (mode: "login" | "register") => void;
-  onEmail: (value: string) => void; onPassword: (value: string) => void; onName: (value: string) => void;
+  mode: "login" | "register"; email: string; password: string; name: string; code: string; error: string; notice: string; verifying: boolean;
+  onClose: () => void; onSubmit: () => void; onVerify: () => void; onResend: () => void; onModeChange: (mode: "login" | "register") => void;
+  onEmail: (value: string) => void; onPassword: (value: string) => void; onName: (value: string) => void; onCode: (value: string) => void;
 }) {
-  return <div className="auth-backdrop"><form className="auth-dialog" onSubmit={(event) => { event.preventDefault(); onSubmit(); }}>
+  return <div className="auth-backdrop"><form className="auth-dialog" onSubmit={(event) => { event.preventDefault(); verifying ? onVerify() : onSubmit(); }}>
     <button type="button" className="popover-close" onClick={onClose}><X size={16} /></button>
     <div className="auth-brand"><img src="/brand/inkwise-mark.svg" alt="" /><span>墨知 <em>Inkwise</em></span></div>
-    <div className="auth-heading"><h2>{mode === "login" ? "欢迎回来" : "创建你的阅读空间"}</h2></div>
-    <div className="auth-tabs" role="tablist"><button className={mode === "login" ? "active" : ""} type="button" onClick={() => onModeChange("login")}>登录</button><button className={mode === "register" ? "active" : ""} type="button" onClick={() => onModeChange("register")}>注册</button></div>
-    <div className="auth-fields">
+    <div className="auth-heading"><h2>{verifying ? "验证你的邮箱" : mode === "login" ? "欢迎回来" : "创建你的阅读空间"}</h2></div>
+    {verifying ? <div className="auth-fields verification-fields"><p>验证码已发送至 <strong>{email}</strong></p><label>六位验证码<input className="verification-code" inputMode="numeric" autoComplete="one-time-code" autoFocus placeholder="000000" required minLength={6} maxLength={6} value={code} onChange={(event) => onCode(event.target.value.replace(/\D/g, "").slice(0, 6))} /></label><button className="auth-inline-action" type="button" onClick={onResend}>重新发送验证码</button></div> : <><div className="auth-tabs" role="tablist"><button className={mode === "login" ? "active" : ""} type="button" onClick={() => onModeChange("login")}>登录</button><button className={mode === "register" ? "active" : ""} type="button" onClick={() => onModeChange("register")}>注册</button></div><div className="auth-fields">
       {mode === "register" && <label>用户名<input placeholder="至少 3 个字符" required minLength={3} value={name} onChange={(event) => onName(event.target.value)} /></label>}
       <label>邮箱<input type="email" placeholder="name@example.com" required autoComplete="email" value={email} onChange={(event) => onEmail(event.target.value)} /></label>
       <label>密码<input type="password" placeholder="至少 8 位" required minLength={8} autoComplete={mode === "login" ? "current-password" : "new-password"} value={password} onChange={(event) => onPassword(event.target.value)} /></label>
-    </div>
+    </div></>}
     {error && <p className="auth-feedback error">{error}</p>}{notice && <p className="auth-feedback auth-notice">{notice}</p>}
-    <button className="auth-submit" type="submit">{mode === "login" ? "登录墨知" : "注册并发送验证邮件"}<ChevronRight size={17} /></button>
+    <button className="auth-submit" type="submit">{verifying ? "完成验证" : mode === "login" ? "登录墨知" : "发送验证码"}<ChevronRight size={17} /></button>
   </form></div>;
 }
 
@@ -628,6 +639,8 @@ function App() {
   const [authName, setAuthName] = useState("");
   const [authNotice, setAuthNotice] = useState("");
   const [authError, setAuthError] = useState("");
+  const [authCode, setAuthCode] = useState("");
+  const [authVerifying, setAuthVerifying] = useState(false);
   const [urlOpen, setUrlOpen] = useState(false);
   const [paperUrl, setPaperUrl] = useState("");
   const [urlLoading, setUrlLoading] = useState(false);
@@ -697,21 +710,17 @@ function App() {
     try {
       if (!supabaseConfigured) throw new Error("SUPABASE_NOT_CONFIGURED");
       if (authMode === "register") {
-        const { data, error } = await supabase.auth.signUp({
-          email: authEmail,
-          password: authPassword,
-          options: {
-            data: { username: authName, display_name: authName },
-            emailRedirectTo: (globalThis as typeof globalThis & { chrome?: { runtime?: { getURL?: (path: string) => string } } }).chrome?.runtime?.getURL?.("index.html"),
-          },
+        const response = await functionRequest("request-signup-code", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: authEmail, username: authName }),
         });
-        if (error) throw error;
-        if (!data.session) {
-          setAuthNotice("验证邮件已发送，请验证邮箱后再登录。");
-          setAuthMode("login");
-          setAuthPassword("");
-          return;
-        }
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "EMAIL_SEND_FAILED");
+        setAuthNotice("请输入邮件中的六位验证码。");
+        setAuthCode("");
+        setAuthVerifying(true);
+        return;
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email: authEmail, password: authPassword });
         if (error) throw error;
@@ -720,8 +729,37 @@ function App() {
       setAuthPassword("");
     } catch (error) {
       const message = error instanceof Error ? error.message : "REQUEST_FAILED";
-      setAuthError(message === "SUPABASE_NOT_CONFIGURED" ? "尚未配置 Supabase 项目。" : message);
+      setAuthError(apiErrors[message] || message);
     }
+  }
+  async function verifyEmailCode() {
+    setAuthError(""); setAuthNotice("");
+    try {
+      if (authCode.length !== 6) throw new Error("请输入六位验证码。");
+      const response = await functionRequest("complete-signup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: authEmail, password: authPassword, code: authCode }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "SIGNUP_FAILED");
+      const { error } = await supabase.auth.signInWithPassword({ email: authEmail, password: authPassword });
+      if (error) throw error;
+      setAuthOpen(false); setAuthVerifying(false); setAuthCode(""); setAuthPassword("");
+    } catch (error) { const message=error instanceof Error?error.message:"SIGNUP_FAILED"; setAuthError(apiErrors[message] || message); }
+  }
+  async function resendEmailCode() {
+    setAuthError(""); setAuthNotice("");
+    try {
+      const response = await functionRequest("request-signup-code", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: authEmail, username: authName }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "EMAIL_SEND_FAILED");
+      setAuthNotice("新的验证码已发送，请查收邮箱。");
+    } catch (error) { const message=error instanceof Error?error.message:"EMAIL_SEND_FAILED"; setAuthError(apiErrors[message] || message); }
   }
   async function signOut() {
     await supabase.auth.signOut();
@@ -994,7 +1032,7 @@ function App() {
           onOpenAccount={() => setAuthOpen(true)}
         />
         <input ref={fileInput} className="welcome-file-input" type="file" accept="application/pdf" onChange={(event) => event.target.files?.[0] && openFile(event.target.files[0])} />
-        {authOpen && (session ? <AccountDialog session={session} usage={usage} onClose={() => setAuthOpen(false)} onSignOut={() => { signOut(); setAuthOpen(false); }} /> : <AuthDialog mode={authMode} email={authEmail} password={authPassword} name={authName} error={authError} notice={authNotice} onClose={() => setAuthOpen(false)} onSubmit={submitAuth} onModeChange={setAuthMode} onEmail={setAuthEmail} onPassword={setAuthPassword} onName={setAuthName} />)}
+        {authOpen && (session ? <AccountDialog session={session} usage={usage} onClose={() => setAuthOpen(false)} onSignOut={() => { signOut(); setAuthOpen(false); }} /> : <AuthDialog mode={authMode} email={authEmail} password={authPassword} name={authName} code={authCode} error={authError} notice={authNotice} verifying={authVerifying} onClose={() => setAuthOpen(false)} onSubmit={submitAuth} onVerify={verifyEmailCode} onResend={resendEmailCode} onModeChange={(nextMode) => { setAuthMode(nextMode); setAuthVerifying(false); setAuthError(""); setAuthNotice(""); }} onEmail={setAuthEmail} onPassword={setAuthPassword} onName={setAuthName} onCode={setAuthCode} />)}
         {urlOpen && <div className="auth-backdrop"><form className="auth-dialog" onSubmit={(event) => { event.preventDefault(); openPdfUrl(); }}><button type="button" className="popover-close" onClick={() => setUrlOpen(false)}><X size={16} /></button><h2>打开在线 PDF</h2><p className="auth-notice">支持公开的 PDF 直链。跨域受限的链接需登录后导入，文件不会保存到服务器。</p><input type="url" required placeholder="粘贴 PDF 直链，例如 https://arxiv.org/pdf/..." value={paperUrl} onChange={(event) => { setPaperUrl(event.target.value); setUrlError(""); }} />{urlError && <p>{urlError}</p>}<button type="submit" disabled={urlLoading}>{urlLoading ? "正在读取…" : "打开 PDF"}</button></form></div>}
       </div>
     );
@@ -1294,7 +1332,7 @@ function App() {
           </div>
         </aside>
       </main>
-      {authOpen && (session ? <AccountDialog session={session} usage={usage} onClose={() => setAuthOpen(false)} onSignOut={() => { signOut(); setAuthOpen(false); }} /> : <AuthDialog mode={authMode} email={authEmail} password={authPassword} name={authName} error={authError} notice={authNotice} onClose={() => setAuthOpen(false)} onSubmit={submitAuth} onModeChange={setAuthMode} onEmail={setAuthEmail} onPassword={setAuthPassword} onName={setAuthName} />)}
+      {authOpen && (session ? <AccountDialog session={session} usage={usage} onClose={() => setAuthOpen(false)} onSignOut={() => { signOut(); setAuthOpen(false); }} /> : <AuthDialog mode={authMode} email={authEmail} password={authPassword} name={authName} code={authCode} error={authError} notice={authNotice} verifying={authVerifying} onClose={() => setAuthOpen(false)} onSubmit={submitAuth} onVerify={verifyEmailCode} onResend={resendEmailCode} onModeChange={(nextMode) => { setAuthMode(nextMode); setAuthVerifying(false); setAuthError(""); setAuthNotice(""); }} onEmail={setAuthEmail} onPassword={setAuthPassword} onName={setAuthName} onCode={setAuthCode} />)}
       {urlOpen && <div className="auth-backdrop"><form className="auth-dialog" onSubmit={(event) => { event.preventDefault(); openPdfUrl(); }}><button type="button" className="popover-close" onClick={() => setUrlOpen(false)}><X size={16} /></button><h2>打开在线 PDF</h2><p className="auth-notice">支持公开的 PDF 直链。跨域受限的链接需登录后导入，文件不会保存到服务器。</p><input type="url" required placeholder="粘贴 PDF 直链，例如 https://arxiv.org/pdf/..." value={paperUrl} onChange={(event) => { setPaperUrl(event.target.value); setUrlError(""); }} />{urlError && <p>{urlError}</p>}<button type="submit" disabled={urlLoading}>{urlLoading ? "正在读取…" : "打开 PDF"}</button></form></div>}
     </div>
   );
