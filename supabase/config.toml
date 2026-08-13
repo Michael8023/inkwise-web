@@ -22,3 +22,5 @@ verify_jwt = false
 verify_jwt = true
 [functions.ai-visual]
 verify_jwt = true
+[functions.mineru-layout]
+verify_jwt = true
