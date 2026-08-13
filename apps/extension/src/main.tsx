@@ -161,6 +161,27 @@ async function detectPageVisualRegions(page: any, viewport: any, textContent: an
     group.push(row);
   }
   flush();
+  // A single figure is often emitted as several adjacent image tiles. Merge
+  // tiles with a small gap and strong alignment before exposing hover actions.
+  let merged = true;
+  while (merged) {
+    merged = false;
+    outer: for (let first = 0; first < regions.length; first += 1) {
+      for (let second = first + 1; second < regions.length; second += 1) {
+        const a = regions[first], b = regions[second];
+        if (a.kind !== "image" || b.kind !== "image") continue;
+        const horizontal = Math.max(a.area.x, b.area.x) <= Math.min(a.area.x + a.area.width, b.area.x + b.area.width) + .025 &&
+          (Math.abs((a.area.y + a.area.height) - b.area.y) <= .035 || Math.abs((b.area.y + b.area.height) - a.area.y) <= .035);
+        const vertical = Math.max(a.area.y, b.area.y) <= Math.min(a.area.y + a.area.height, b.area.y + b.area.height) + .025 &&
+          (Math.abs((a.area.x + a.area.width) - b.area.x) <= .035 || Math.abs((b.area.x + b.area.width) - a.area.x) <= .035);
+        if (!horizontal && !vertical && overlapRatio(a.area, b.area) <= .3) continue;
+        const left = Math.min(a.area.x, b.area.x), top = Math.min(a.area.y, b.area.y);
+        const right = Math.max(a.area.x + a.area.width, b.area.x + b.area.width), bottom = Math.max(a.area.y + a.area.height, b.area.y + b.area.height);
+        regions[first] = { ...a, area: { x: left, y: top, width: right - left, height: bottom - top } };
+        regions.splice(second, 1); merged = true; break outer;
+      }
+    }
+  }
   return regions.filter(region => !regions.some(other => other.id !== region.id && other.kind === "image" && region.kind === "table" && overlapRatio(region.area, other.area) > .75));
 }
 const apiErrors: Record<string, string> = {
@@ -185,6 +206,8 @@ const apiErrors: Record<string, string> = {
   IMAGE_INVALID: "框选图像无效或过大，请缩小区域后重试。",
   MODEL_VISION_UNSUPPORTED: "当前模型不支持图像理解，请切换其他模型。",
   AI_VISUAL_FAILED: "图表识别失败，请稍后重试。",
+  AI_UPSTREAM_TIMEOUT: "AI 图表分析超时，额度已退回，请稍后重试或切换模型。",
+  REQUEST_TIMEOUT: "请求超时，请检查网络后重试。",
 };
 function readableApiError(error: unknown, fallback: string) { const code=error instanceof Error?error.message:String(error||""); return apiErrors[code]||fallback; }
 
@@ -1103,26 +1126,30 @@ function App() {
   async function runVisualTask(selection: VisualSelection, kind: "explain" | "table") {
     setVisualSelections(items => items.map(item => item.id === selection.id ? { ...item, task: { kind, state: "loading" } } : item));
     try {
-      const response = await functionRequest("ai-visual", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind, imageDataUrl: selection.imageDataUrl, pageContext: selection.pageContext, documentContext: documentText.slice(0, 30000), pageNumber: selection.pageNumber, model, requestId: crypto.randomUUID() }) });
+      const controller = new AbortController(); const timeout = window.setTimeout(() => controller.abort(), 55_000);
+      const response = await functionRequest("ai-visual", { method: "POST", signal: controller.signal, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind, imageDataUrl: selection.imageDataUrl, pageContext: selection.pageContext, documentContext: documentText.slice(0, 30000), pageNumber: selection.pageNumber, model, requestId: crypto.randomUUID() }) }).finally(() => window.clearTimeout(timeout));
       const result = await response.json();
       if (!response.ok || !result.text) throw new Error(result.error || "AI_VISUAL_FAILED");
       if (typeof result.creditsRemaining === "number") setUsage(current => current ? { ...current, creditsRemaining: result.creditsRemaining } : current);
       setVisualSelections(items => items.map(item => item.id === selection.id ? { ...item, task: { kind, state: "done", result: result.text } } : item));
     } catch (error) {
-      setVisualSelections(items => items.map(item => item.id === selection.id ? { ...item, task: { kind, state: "error", result: readableApiError(error, "图表理解失败，请稍后重试。") } } : item));
+      const message = error instanceof DOMException && error.name === "AbortError" ? "REQUEST_TIMEOUT" : error;
+      setVisualSelections(items => items.map(item => item.id === selection.id ? { ...item, task: { kind, state: "error", result: readableApiError(message, "图表理解失败，请稍后重试。") } } : item));
     }
   }
   async function followupVisualExplanation(selection: VisualSelection, question: string) {
     const previous = selection.task?.result || "";
     setVisualSelections(items => items.map(item => item.id === selection.id ? { ...item, task: { kind: "explain", state: "loading", result: previous } } : item));
     try {
-      const response = await functionRequest("ai-visual", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind: "explain", imageDataUrl: selection.imageDataUrl, pageContext: selection.pageContext, documentContext: documentText.slice(0, 30000), previousExplanation: previous, question, pageNumber: selection.pageNumber, model, requestId: crypto.randomUUID() }) });
+      const controller = new AbortController(); const timeout = window.setTimeout(() => controller.abort(), 55_000);
+      const response = await functionRequest("ai-visual", { method: "POST", signal: controller.signal, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind: "explain", imageDataUrl: selection.imageDataUrl, pageContext: selection.pageContext, documentContext: documentText.slice(0, 30000), previousExplanation: previous, question, pageNumber: selection.pageNumber, model, requestId: crypto.randomUUID() }) }).finally(() => window.clearTimeout(timeout));
       const result = await response.json();
       if (!response.ok || !result.text) throw new Error(result.error || "AI_VISUAL_FAILED");
       if (typeof result.creditsRemaining === "number") setUsage(current => current ? { ...current, creditsRemaining: result.creditsRemaining } : current);
       setVisualSelections(items => items.map(item => item.id === selection.id ? { ...item, task: { kind: "explain", state: "done", result: result.text } } : item));
     } catch (error) {
-      setVisualSelections(items => items.map(item => item.id === selection.id ? { ...item, task: { kind: "explain", state: "error", result: readableApiError(error, "追问失败，请稍后重试。") } } : item));
+      const message = error instanceof DOMException && error.name === "AbortError" ? "REQUEST_TIMEOUT" : error;
+      setVisualSelections(items => items.map(item => item.id === selection.id ? { ...item, task: { kind: "explain", state: "error", result: readableApiError(message, "追问失败，请稍后重试。") } } : item));
     }
   }
   function persistHighlight(selection: Selection) {
