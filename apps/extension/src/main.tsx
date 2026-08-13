@@ -31,6 +31,10 @@ import {
   Trash2,
   Link,
   UserRound,
+  ScanLine,
+  Image as ImageIcon,
+  Table2,
+  Download,
 } from "lucide-react";
 import "./style.css";
 import { mountAdmin } from "./admin";
@@ -59,6 +63,14 @@ type Selection = {
   task?: Task;
 };
 type SavedHighlight = Omit<Selection, "task" | "offsetX" | "offsetY"> & { color: string };
+type VisualSelection = {
+  id: string;
+  pageNumber: number;
+  imageDataUrl: string;
+  pageContext: string;
+  area: { x: number; y: number; width: number; height: number };
+  task?: { kind: "explain" | "table"; state: "loading" | "done" | "error"; result?: string };
+};
 type Tab = "summary" | "chat" | "history";
 type OutlineItem = { title: string; dest?: unknown; items?: OutlineItem[] };
 type ChatMessage = { role: "user" | "assistant"; content: string };
@@ -83,6 +95,9 @@ const apiErrors: Record<string, string> = {
   CODE_ATTEMPTS_EXCEEDED: "错误次数过多，请重新获取验证码。",
   EMAIL_SEND_FAILED: "验证邮件发送失败，请稍后重试。",
   PASSWORD_INVALID: "密码长度需为 8 至 72 位。",
+  IMAGE_INVALID: "框选图像无效或过大，请缩小区域后重试。",
+  MODEL_VISION_UNSUPPORTED: "当前模型不支持图像理解，请切换其他模型。",
+  AI_VISUAL_FAILED: "图表识别失败，请稍后重试。",
 };
 function readableApiError(error: unknown, fallback: string) { const code=error instanceof Error?error.message:String(error||""); return apiErrors[code]||fallback; }
 
@@ -372,6 +387,43 @@ function SelectionPopover({
   );
 }
 
+function VisualPopover({ selection, pageRef, onClose, onTask }: {
+  selection: VisualSelection;
+  pageRef: React.RefObject<HTMLDivElement | null>;
+  onClose: (id: string) => void;
+  onTask: (selection: VisualSelection, kind: "explain" | "table") => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState({ left: -9999, top: -9999 });
+  useLayoutEffect(() => {
+    const update = () => {
+      const page = pageRef.current, popover = ref.current;
+      if (!page || !popover) return;
+      const rect = page.getBoundingClientRect(), margin = 12;
+      const anchorX = rect.left + rect.width * (selection.area.x + selection.area.width);
+      const anchorY = rect.top + rect.height * selection.area.y;
+      const width = popover.offsetWidth, height = popover.offsetHeight;
+      setPosition({ left: Math.min(Math.max(margin, anchorX + 9), window.innerWidth - width - margin), top: Math.min(Math.max(margin, anchorY), window.innerHeight - height - margin) });
+    };
+    update();
+    const scroller = document.querySelector(".document-scroll");
+    scroller?.addEventListener("scroll", update, { passive: true }); window.addEventListener("resize", update);
+    const observer = new ResizeObserver(update); if (ref.current) observer.observe(ref.current);
+    return () => { scroller?.removeEventListener("scroll", update); window.removeEventListener("resize", update); observer.disconnect(); };
+  }, [pageRef, selection.area, selection.task]);
+  async function copyImage() {
+    const blob = await (await fetch(selection.imageDataUrl)).blob();
+    if (navigator.clipboard?.write && typeof ClipboardItem !== "undefined") await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
+  }
+  return <div ref={ref} className="selection-popover visual-popover" style={position} onMouseDown={event => event.stopPropagation()} role="dialog" aria-label="图表操作">
+    <button className="popover-close" aria-label="关闭" onClick={() => onClose(selection.id)}><X size={15}/></button>
+    <div className="visual-title"><ScanLine size={15}/><strong>图表选区</strong><span>第 {selection.pageNumber} 页</span></div>
+    <img src={selection.imageDataUrl} alt="框选的 PDF 区域"/>
+    <div className="popover-actions visual-actions"><button onClick={() => onTask(selection, "explain")} disabled={selection.task?.state === "loading"}><ImageIcon size={14}/>AI 解读</button><button onClick={() => onTask(selection, "table")} disabled={selection.task?.state === "loading"}><Table2 size={14}/>提取表格</button><button title="复制图片" onClick={() => copyImage().catch(() => undefined)}><Copy size={14}/></button><a title="下载图片" href={selection.imageDataUrl} download={`inkwise-page-${selection.pageNumber}.jpg`}><Download size={14}/></a></div>
+    {selection.task && <div className={`popover-result ${selection.task.state}`}>{selection.task.state === "loading" ? "正在理解图表…" : <><ReactMarkdown>{selection.task.result || ""}</ReactMarkdown>{selection.task.state === "done" && <button className="visual-copy-result" onClick={() => navigator.clipboard.writeText(selection.task?.result || "")}><Copy size={13}/>复制结果</button>}</>}</div>}
+  </div>;
+}
+
 function PageView({
   pdf,
   pageNumber,
@@ -385,6 +437,11 @@ function PageView({
   onMove,
   onHighlight,
   onDeleteHighlight,
+  visualMode,
+  visualSelections,
+  onVisualSelect,
+  onVisualClose,
+  onVisualTask,
   onVisible,
 }: {
   pdf: any;
@@ -399,6 +456,11 @@ function PageView({
   onMove: (id: string, offsetX: number, offsetY: number) => void;
   onHighlight: (id: string, color: string) => void;
   onDeleteHighlight: (id: string) => void;
+  visualMode: boolean;
+  visualSelections: VisualSelection[];
+  onVisualSelect: (selection: Omit<VisualSelection, "id">) => void;
+  onVisualClose: (id: string) => void;
+  onVisualTask: (selection: VisualSelection, kind: "explain" | "table") => void;
   onVisible: (page: number) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -409,6 +471,7 @@ function PageView({
   const [pageText, setPageText] = useState("");
   const [activeHighlight, setActiveHighlight] = useState<{ id: string; area: { x: number; y: number; width: number; height: number } } | null>(null);
   const highlightHideTimer = useRef<number | null>(null);
+  const [visualDraft, setVisualDraft] = useState<{ startX: number; startY: number; x: number; y: number; width: number; height: number } | null>(null);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -472,6 +535,7 @@ function PageView({
   }, [pdf, pageNumber, scale]);
 
   function selectText() {
+    if (visualMode) return;
     const nativeSelection = window.getSelection();
     const text = nativeSelection?.toString().trim();
     if (!text || !nativeSelection?.rangeCount || !hostRef.current) return;
@@ -514,6 +578,37 @@ function PageView({
     });
     nativeSelection.removeAllRanges();
   }
+  function beginVisualSelection(event: React.PointerEvent<HTMLDivElement>) {
+    if (!visualMode || !hostRef.current) return;
+    event.preventDefault();
+    const rect = hostRef.current.getBoundingClientRect();
+    const x = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+    const y = Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height));
+    setVisualDraft({ startX: x, startY: y, x, y, width: 0, height: 0 });
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+  function moveVisualSelection(event: React.PointerEvent<HTMLDivElement>) {
+    if (!visualDraft || !hostRef.current) return;
+    const rect = hostRef.current.getBoundingClientRect();
+    const currentX = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+    const currentY = Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height));
+    setVisualDraft(draft => draft && ({ ...draft, x: Math.min(draft.startX, currentX), y: Math.min(draft.startY, currentY), width: Math.abs(currentX - draft.startX), height: Math.abs(currentY - draft.startY) }));
+  }
+  function finishVisualSelection(event: React.PointerEvent<HTMLDivElement>) {
+    if (!visualDraft || !canvasRef.current) return;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    const area = { x: visualDraft.x, y: visualDraft.y, width: visualDraft.width, height: visualDraft.height };
+    setVisualDraft(null);
+    if (area.width < 0.025 || area.height < 0.025) return;
+    const source = canvasRef.current;
+    const sx = Math.round(area.x * source.width), sy = Math.round(area.y * source.height);
+    const sw = Math.max(1, Math.round(area.width * source.width)), sh = Math.max(1, Math.round(area.height * source.height));
+    const ratio = Math.min(1, 1600 / Math.max(sw, sh));
+    const crop = document.createElement("canvas");
+    crop.width = Math.max(1, Math.round(sw * ratio)); crop.height = Math.max(1, Math.round(sh * ratio));
+    crop.getContext("2d")?.drawImage(source, sx, sy, sw, sh, 0, 0, crop.width, crop.height);
+    onVisualSelect({ pageNumber, imageDataUrl: crop.toDataURL("image/jpeg", .88), pageContext: pageText, area });
+  }
   function detectHighlight(event: React.MouseEvent<HTMLDivElement>) {
     const page = hostRef.current;
     if (!page) return;
@@ -543,13 +638,17 @@ function PageView({
       <span className="page-label">第 {pageNumber} 页</span>
       <div
         ref={hostRef}
-        className="page-sheet"
+        className={`page-sheet${visualMode ? " visual-select-mode" : ""}`}
         style={{
           width: size.width || undefined,
           height: size.height || undefined,
         }}
         onMouseUp={selectText}
         onMouseMove={detectHighlight}
+        onPointerDown={beginVisualSelection}
+        onPointerMove={moveVisualSelection}
+        onPointerUp={finishVisualSelection}
+        onPointerCancel={() => setVisualDraft(null)}
         onMouseLeave={() => {
           if (highlightHideTimer.current !== null) window.clearTimeout(highlightHideTimer.current);
           highlightHideTimer.current = window.setTimeout(() => {
@@ -560,6 +659,8 @@ function PageView({
       >
         <canvas ref={canvasRef} />
         <div className="text-layer" ref={layerRef} />
+        {visualDraft && <div className="visual-selection-draft" style={{ left: `${visualDraft.x * 100}%`, top: `${visualDraft.y * 100}%`, width: `${visualDraft.width * 100}%`, height: `${visualDraft.height * 100}%` }} />}
+        {visualSelections.map(selection => <div key={selection.id} className="visual-selection-area" style={{ left: `${selection.area.x * 100}%`, top: `${selection.area.y * 100}%`, width: `${selection.area.width * 100}%`, height: `${selection.area.height * 100}%` }} />)}
         <div className="temporary-selection-layer" aria-hidden="true">
           {selections.flatMap((selection) => selection.highlights.map((highlight, index) => (
             <span key={`${selection.id}-${index}`} style={{ left: `${highlight.x * 100}%`, top: `${highlight.y * 100}%`, width: `${highlight.width * 100}%`, height: `${highlight.height * 100}%` }} />
@@ -594,6 +695,7 @@ function PageView({
             onHighlight={onHighlight}
           />
         ))}
+        {visualSelections.map(selection => <VisualPopover key={selection.id} selection={selection} pageRef={hostRef} onClose={onVisualClose} onTask={onVisualTask}/>)}
       </div>
     </div>
   );
@@ -613,6 +715,8 @@ function App() {
   const [tab, setTab] = useState<Tab>("summary");
   const [selections, setSelections] = useState<Selection[]>([]);
   const [highlights, setHighlights] = useState<SavedHighlight[]>([]);
+  const [visualMode, setVisualMode] = useState(false);
+  const [visualSelections, setVisualSelections] = useState<VisualSelection[]>([]);
   const fileInput = useRef<HTMLInputElement>(null);
   const [documentId, setDocumentId] = useState("");
   const [documentText, setDocumentText] = useState("");
@@ -775,7 +879,7 @@ function App() {
 
   async function openPdfData(data: ArrayBuffer, name: string) {
     try {
-      setSelections([]); setHighlights([]);
+      setSelections([]); setHighlights([]); setVisualSelections([]); setVisualMode(false);
       setDocumentReady(false);
       setFileName(name);
       const document = await pdfjsLib.getDocument({
@@ -891,6 +995,22 @@ function App() {
     const next = { ...selection, id, highlightColor: highlightMode ? "#f4cf4d" : undefined };
     setSelections((items) => [...items, next]);
     if (highlightMode) persistHighlight(next);
+  }
+  function addVisualSelection(selection: Omit<VisualSelection, "id">) {
+    setVisualSelections(items => [...items, { ...selection, id: crypto.randomUUID() }]);
+    setVisualMode(false);
+  }
+  async function runVisualTask(selection: VisualSelection, kind: "explain" | "table") {
+    setVisualSelections(items => items.map(item => item.id === selection.id ? { ...item, task: { kind, state: "loading" } } : item));
+    try {
+      const response = await functionRequest("ai-visual", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind, imageDataUrl: selection.imageDataUrl, pageContext: selection.pageContext, documentContext: documentText.slice(0, 30000), pageNumber: selection.pageNumber, model, requestId: crypto.randomUUID() }) });
+      const result = await response.json();
+      if (!response.ok || !result.text) throw new Error(result.error || "AI_VISUAL_FAILED");
+      if (typeof result.creditsRemaining === "number") setUsage(current => current ? { ...current, creditsRemaining: result.creditsRemaining } : current);
+      setVisualSelections(items => items.map(item => item.id === selection.id ? { ...item, task: { kind, state: "done", result: result.text } } : item));
+    } catch (error) {
+      setVisualSelections(items => items.map(item => item.id === selection.id ? { ...item, task: { kind, state: "error", result: readableApiError(error, "图表理解失败，请稍后重试。") } } : item));
+    }
   }
   function persistHighlight(selection: Selection) {
     if (!selection.highlightColor) return;
@@ -1085,6 +1205,9 @@ function App() {
                 <Plus size={16} />
               </IconButton>
             </div>
+            <IconButton label={visualMode ? "退出图表框选" : "框选图片或表格"} active={visualMode} onClick={() => { setVisualMode(value => !value); setSelections([]); }}>
+              <ScanLine size={17} />
+            </IconButton>
           </div>
         )}
         <div className="topbar-right">
@@ -1174,6 +1297,11 @@ function App() {
                   onHighlight={highlightSelection}
                   onDeleteHighlight={(id) => setHighlights((items) => items.filter((item) => item.id !== id))}
                   highlights={highlights.filter((item) => item.pageNumber === index + 1)}
+                  visualMode={visualMode}
+                  visualSelections={visualSelections.filter(item => item.pageNumber === index + 1)}
+                  onVisualSelect={addVisualSelection}
+                  onVisualClose={(id) => setVisualSelections(items => items.filter(item => item.id !== id))}
+                  onVisualTask={runVisualTask}
                   onVisible={(page) => { setCurrentPage(page); setPageInput(String(page)); }}
                 />
               ))}
