@@ -504,12 +504,13 @@ function VisualPopover({ selection, pageRef, onClose, onTask, onFollowup }: {
     await copyImageDataUrl(selection.imageDataUrl);
   }
   return <div ref={ref} className="selection-popover visual-popover" style={position} onMouseDown={event => event.stopPropagation()} role="dialog" aria-label="图表操作">
-    <button className="popover-close" aria-label="关闭" onClick={() => onClose(selection.id)}><X size={15}/></button>
-    <div className="visual-title"><ScanLine size={15}/><strong>图表选区</strong><span>第 {selection.pageNumber} 页</span></div>
-    <img src={selection.imageDataUrl} alt="框选的 PDF 区域"/>
-    <div className="popover-actions visual-actions"><button onClick={() => onTask(selection, "explain")} disabled={selection.task?.state === "loading"}><ImageIcon size={14}/>AI 解读</button><button onClick={() => onTask(selection, "table")} disabled={selection.task?.state === "loading"}><Table2 size={14}/>提取表格</button><button title="复制图片" onClick={() => copyImage().catch(() => undefined)}><Copy size={14}/></button><a title="下载图片" href={selection.imageDataUrl} download={`inkwise-page-${selection.pageNumber}.jpg`}><Download size={14}/></a></div>
-    {selection.task && <div className={`popover-result ${selection.task.state}`}>{selection.task.state === "loading" ? "正在理解图表…" : <><ReactMarkdown>{selection.task.result || ""}</ReactMarkdown>{selection.task.state === "done" && <button className="visual-copy-result" onClick={() => navigator.clipboard.writeText(selection.task?.result || "")}><Copy size={13}/>复制结果</button>}</>}</div>}
-    {selection.task?.kind === "explain" && selection.task.state === "done" && <form className="explain-followup" onSubmit={event => { event.preventDefault(); const value=followup.trim(); if (!value || !onFollowup) return; onFollowup(selection,value); setFollowup(""); }}><input value={followup} onChange={event => setFollowup(event.target.value)} placeholder="继续追问这张图…"/><button disabled={!followup.trim()}><Send size={14}/></button></form>}
+    <div className="visual-popover-header"><div className="visual-title"><ScanLine size={15}/><strong>图表选区</strong><span>第 {selection.pageNumber} 页</span></div><button className="popover-close" aria-label="关闭" title="关闭" onClick={() => onClose(selection.id)}><X size={15}/></button></div>
+    <div className="visual-popover-scroll">
+      <img src={selection.imageDataUrl} alt="框选的 PDF 区域"/>
+      <div className="popover-actions visual-actions"><button onClick={() => onTask(selection, "explain")} disabled={selection.task?.state === "loading"}><ImageIcon size={14}/>AI 解读</button><button onClick={() => onTask(selection, "table")} disabled={selection.task?.state === "loading"}><Table2 size={14}/>提取表格</button><button title="复制图片" onClick={() => copyImage().catch(() => undefined)}><Copy size={14}/></button><a title="下载图片" href={selection.imageDataUrl} download={`inkwise-page-${selection.pageNumber}.jpg`}><Download size={14}/></a></div>
+      {selection.task && <div className={`popover-result ${selection.task.state}`}>{selection.task.state === "loading" ? "正在理解图表…" : <><ReactMarkdown>{selection.task.result || ""}</ReactMarkdown>{selection.task.state === "done" && <button className="visual-copy-result" onClick={() => navigator.clipboard.writeText(selection.task?.result || "")}><Copy size={13}/>复制结果</button>}</>}</div>}
+      {selection.task?.kind === "explain" && selection.task.state === "done" && <form className="explain-followup" onSubmit={event => { event.preventDefault(); const value=followup.trim(); if (!value || !onFollowup) return; onFollowup(selection,value); setFollowup(""); }}><input value={followup} onChange={event => setFollowup(event.target.value)} placeholder="继续追问这张图…"/><button disabled={!followup.trim()}><Send size={14}/></button></form>}
+    </div>
   </div>;
 }
 

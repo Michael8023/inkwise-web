@@ -686,10 +686,13 @@ button {
 .popover-actions button:disabled {
   opacity: 0.55;
 }
-.visual-popover { width: min(430px, calc(100vw - 24px)); }
-.visual-title { display: flex; align-items: center; gap: 7px; margin: 0 25px 9px 2px; color: var(--accent); font-size: 12px; }
+.visual-popover { width: min(430px, calc(100vw - 24px)); max-height: min(680px, calc(100dvh - 24px)); display: flex; flex-direction: column; overflow: hidden; padding: 0; }
+.visual-popover-header { position: relative; flex: 0 0 auto; min-height: 40px; display: flex; align-items: center; border-bottom: 1px solid var(--border); background: var(--surface); padding: 10px 38px 10px 12px; }
+.visual-title { width: 100%; display: flex; align-items: center; gap: 7px; margin: 0; color: var(--accent); font-size: 12px; }
 .visual-title span { margin-left: auto; color: var(--text-muted); font-size: 10px; }
-.visual-popover > img { width: 100%; max-height: 220px; display: block; object-fit: contain; border: 1px solid var(--border); border-radius: 6px; background: #fff; }
+.visual-popover-header .popover-close { top: 50%; right: 9px; transform: translateY(-50%); }
+.visual-popover-scroll { min-height: 0; flex: 1 1 auto; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; padding: 11px; scrollbar-gutter: stable; }
+.visual-popover-scroll > img { width: 100%; max-height: 220px; display: block; object-fit: contain; border: 1px solid var(--border); border-radius: 6px; background: #fff; }
 .visual-actions { margin-top: 9px; }
 .visual-actions button, .visual-actions a { min-height: 29px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; border: 0; border-radius: 5px; background: var(--accent-soft); color: var(--accent); padding: 6px 8px; font-size: 12px; text-decoration: none; cursor: pointer; }
 .visual-actions button:nth-last-child(-n+2), .visual-actions a { width: 30px; padding: 0; }

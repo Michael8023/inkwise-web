@@ -25,7 +25,7 @@ Deno.serve(async req => {
       : kind === "table"
       ? "识别框选区域中的表格。准确转写单元格，保留表头、层级、数值、单位和脚注；主要输出可复制的 Markdown 表格。无法辨认的单元格用 [?]，不要编造。表格后用两三句话概括关键趋势。"
       : "识别框选区域是图片、图表、流程图、公式、伪代码还是其他内容。先简述它展示了什么，再结合论文语境通俗解释坐标轴、图例、变量、关键趋势或步骤，以及它对论文论点的作用。不要仅做视觉描述，也不要编造不可见信息。";
-    const prompt = `你是严谨的学术论文视觉阅读助手。${task}\n\n当前页文字：\n${pageContext}\n\n论文背景：\n${documentContext}`;
+    const prompt = `你是严谨的中文学术论文视觉阅读助手。无论论文、图中文字或用户问题使用什么语言，你的解释、分析、总结和追问回答都必须使用简体中文。专业术语首次出现时可以在中文后保留必要的英文原文，但不得整段使用英文回答。\n\n任务：\n${task}\n\n当前页文字：\n${pageContext}\n\n论文背景：\n${documentContext}\n\n再次强调：最终回答必须使用自然、通俗、准确的简体中文。`;
     const text = await completeVision(model, prompt, imageDataUrl, kind === "table" ? 2200 : 1600);
     await settle(requestId, text.length);
     return json({ text, model, creditsUsed: charge.credits, creditsRemaining: charge.remaining });
