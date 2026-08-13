@@ -75,7 +75,8 @@ type VisualSelection = {
 };
 type VisualRegion = {
   id: string;
-  kind: "image" | "table";
+  kind: "image" | "table" | "formula" | "caption";
+  captionFor?: "image" | "table";
   area: { x: number; y: number; width: number; height: number };
   pageNumber?: number;
 };
@@ -197,19 +198,28 @@ function mineruBox(value: unknown): [number, number, number, number] | null {
 
 function collectMineruRegions(value: unknown, pageSizes: Array<{ width: number; height: number }>): VisualRegion[] {
   const found: VisualRegion[] = [];
-  const visit = (node: any, inheritedPage?: number) => {
+  const kindForNode = (node: any, key = ""): Pick<VisualRegion, "kind" | "captionFor"> | null => {
+    const label = `${node.type || node.category || node.block_type || node.layout_type || node.label || ""} ${key}`.toLowerCase();
+    if (/image_caption|figure_caption|fig_caption/.test(label)) return { kind: "caption", captionFor: "image" };
+    if (/table_caption|tab_caption/.test(label)) return { kind: "caption", captionFor: "table" };
+    if (/caption/.test(label)) return { kind: "caption" };
+    if (/equation|formula|math/.test(label)) return { kind: "formula" };
+    if (/table/.test(label)) return { kind: "table" };
+    if (/figure|image|img|picture/.test(label)) return { kind: "image" };
+    return null;
+  };
+  const visit = (node: any, inheritedPage?: number, sourceKey = "") => {
     if (!node || typeof node !== "object") return;
-    if (Array.isArray(node)) { node.forEach(item => visit(item, inheritedPage)); return; }
-    const label = String(node.type || node.category || node.block_type || node.layout_type || "").toLowerCase();
-    const kind = /table/.test(label) ? "table" : /figure|image|img|picture/.test(label) ? "image" : null;
+    if (Array.isArray(node)) { node.forEach(item => visit(item, inheritedPage, sourceKey)); return; }
+    const regionType = kindForNode(node, sourceKey);
     const page = Number(node.page_idx ?? node.page_id ?? node.page_no ?? node.page ?? inheritedPage);
     const box = mineruBox(node.bbox || node.box || node.bounding_box || node.poly);
-    if (kind && box && Number.isInteger(page) && page >= 0 && page < pageSizes.length) {
+    if (regionType && box && Number.isInteger(page) && page >= 0 && page < pageSizes.length) {
       const size = pageSizes[page]; const [x0, y0, x1, y1] = box;
       const area = { x: Math.max(0, x0 / size.width), y: Math.max(0, y0 / size.height), width: Math.min(1, (x1 - x0) / size.width), height: Math.min(1, (y1 - y0) / size.height) };
-      if (area.width > .025 && area.height > .02) found.push({ id: crypto.randomUUID(), kind, area, pageNumber: page + 1 });
+      if (area.width > .01 && area.height > .01) found.push({ id: crypto.randomUUID(), ...regionType, area, pageNumber: page + 1 });
     }
-    Object.entries(node).forEach(([key, child]) => { if (!["bbox", "box", "bounding_box", "poly"].includes(key)) visit(child, page); });
+    Object.entries(node).forEach(([key, child]) => { if (!["bbox", "box", "bounding_box", "poly"].includes(key)) visit(child, page, key); });
   };
   visit(value);
   const unique: VisualRegion[] = [];
@@ -589,6 +599,7 @@ function PageView({
   visualMode,
   visualSelections,
   mineruRegions,
+  mineruReady,
   onVisualSelect,
   onVisualClose,
   onVisualTask,
@@ -610,6 +621,7 @@ function PageView({
   visualMode: boolean;
   visualSelections: VisualSelection[];
   mineruRegions: VisualRegion[];
+  mineruReady: boolean;
   onVisualSelect: (selection: Omit<VisualSelection, "id">) => VisualSelection;
   onVisualClose: (id: string) => void;
   onVisualTask: (selection: VisualSelection, kind: "explain" | "table") => void;
@@ -818,7 +830,11 @@ function PageView({
         <canvas ref={canvasRef} />
         <div className="text-layer" ref={layerRef} />
         {visualDraft && <div className="visual-selection-draft" style={{ left: `${visualDraft.x * 100}%`, top: `${visualDraft.y * 100}%`, width: `${visualDraft.width * 100}%`, height: `${visualDraft.height * 100}%` }} />}
-        <div className="auto-visual-regions" aria-label="自动识别的图片和表格">{(mineruRegions.length ? mineruRegions : visualRegions).map(region => <div key={region.id} className={`auto-visual-region ${region.kind}${activeVisualRegion === region.id ? " active" : ""}`} style={{ left: `${region.area.x * 100}%`, top: `${region.area.y * 100}%`, width: `${region.area.width * 100}%`, height: `${region.area.height * 100}%` }} onMouseEnter={() => setActiveVisualRegion(region.id)} onMouseLeave={() => setActiveVisualRegion(current => current === region.id ? null : current)}><div className="auto-visual-actions"><span>{region.kind === "table" ? "表格" : "图片"}</span><button title="复制" aria-label="复制图片" onClick={event => { event.stopPropagation(); copyVisualRegion(region).catch(() => undefined); }}><Copy size={13}/></button><button title="结合论文解释" aria-label="解释图片" onClick={event => { event.stopPropagation(); const selection=createSelectionFromRegion(region); if (selection) onVisualTask(selection,"explain"); }}><Sparkles size={13}/></button></div></div>)}</div>
+        <div className="auto-visual-regions" aria-label="自动识别的文档结构区域">{(mineruReady ? mineruRegions : visualRegions).map(region => {
+          const label = region.kind === "table" ? "表格" : region.kind === "formula" ? "公式" : region.kind === "caption" ? (region.captionFor === "table" ? "表题" : region.captionFor === "image" ? "图题" : "标题") : "图片";
+          const actionable = region.kind !== "caption";
+          return <div key={region.id} className={`auto-visual-region ${region.kind}${activeVisualRegion === region.id ? " active" : ""}`} style={{ left: `${region.area.x * 100}%`, top: `${region.area.y * 100}%`, width: `${region.area.width * 100}%`, height: `${region.area.height * 100}%` }} onMouseEnter={() => setActiveVisualRegion(region.id)} onMouseLeave={() => setActiveVisualRegion(current => current === region.id ? null : current)}><div className="auto-visual-actions"><span>{label}</span>{actionable && <><button title="复制" aria-label={`复制${label}`} onClick={event => { event.stopPropagation(); copyVisualRegion(region).catch(() => undefined); }}><Copy size={13}/></button><button title="结合论文解释" aria-label={`解释${label}`} onClick={event => { event.stopPropagation(); const selection=createSelectionFromRegion(region); if (selection) onVisualTask(selection,"explain"); }}><Sparkles size={13}/></button></>}</div></div>;
+        })}</div>
         {visualSelections.map(selection => <div key={selection.id} className="visual-selection-area" style={{ left: `${selection.area.x * 100}%`, top: `${selection.area.y * 100}%`, width: `${selection.area.width * 100}%`, height: `${selection.area.height * 100}%` }} />)}
         <div className="temporary-selection-layer" aria-hidden="true">
           {selections.flatMap((selection) => selection.highlights.map((highlight, index) => (
@@ -877,6 +893,7 @@ function App() {
   const [visualMode, setVisualMode] = useState(false);
   const [visualSelections, setVisualSelections] = useState<VisualSelection[]>([]);
   const [mineruRegions, setMineruRegions] = useState<VisualRegion[]>([]);
+  const [mineruReady, setMineruReady] = useState(false);
   const [layoutState, setLayoutState] = useState<LayoutState>({ state: "idle" });
   const pdfBytes = useRef<ArrayBuffer | null>(null);
   const autoLayoutDocument = useRef("");
@@ -1047,7 +1064,7 @@ function App() {
 
   async function openPdfData(data: ArrayBuffer, name: string) {
     try {
-      setSelections([]); setHighlights([]); setVisualSelections([]); setVisualMode(false); setMineruRegions([]); setLayoutState({ state: "idle" }); autoLayoutDocument.current = "";
+      setSelections([]); setHighlights([]); setVisualSelections([]); setVisualMode(false); setMineruRegions([]); setMineruReady(false); setLayoutState({ state: "idle" }); autoLayoutDocument.current = "";
       setDocumentReady(false);
       setFileName(name);
       pdfBytes.current = data.slice(0);
@@ -1122,8 +1139,8 @@ function App() {
       const raw: unknown[] = await Promise.all(jsonFiles.map((file: JSZip.JSZipObject) => file.async("string").then((text: string) => JSON.parse(text)).catch(() => null)));
       const sizes = await Promise.all(Array.from({ length: pdf.numPages }, (_, index) => pdf.getPage(index + 1).then((page: any) => { const viewport = page.getViewport({ scale: 1 }); return { width: viewport.width, height: viewport.height }; })));
       const regions = raw.flatMap((value: unknown) => collectMineruRegions(value, sizes));
-      if (!regions.length) throw new Error("MINERU_LAYOUT_EMPTY");
-      setMineruRegions(regions); setLayoutState({ state: "done", message: `已识别 ${regions.filter((item: VisualRegion) => item.kind === "image").length} 张图片和 ${regions.filter((item: VisualRegion) => item.kind === "table").length} 个表格`, progress: 100 });
+      setMineruRegions(regions); setMineruReady(true);
+      setLayoutState({ state: "done", message: regions.length ? `已识别 ${regions.filter((item: VisualRegion) => item.kind === "image").length} 张图片、${regions.filter((item: VisualRegion) => item.kind === "table").length} 个表格与 ${regions.filter((item: VisualRegion) => item.kind === "formula").length} 条公式` : "MinerU 已完成版面分析，未发现可交互结构区域。", progress: 100 });
     } catch (error) {
       const message = error instanceof Error ? error.message : "MINERU_REQUEST_FAILED";
       setLayoutState({ state: "error", message: message.includes("MINERU_API_TOKEN_NOT_CONFIGURED") ? "尚未配置 MinerU Token，仍使用本地识别。" : `MinerU 版面分析失败：${message}` });
@@ -1539,6 +1556,7 @@ function App() {
                   visualMode={visualMode}
                   visualSelections={visualSelections.filter(item => item.pageNumber === index + 1)}
                   mineruRegions={mineruRegions.filter(item => item.pageNumber === index + 1)}
+                  mineruReady={mineruReady}
                   onVisualSelect={addVisualSelection}
                   onVisualClose={(id) => setVisualSelections(items => items.filter(item => item.id !== id))}
                   onVisualTask={runVisualTask}
