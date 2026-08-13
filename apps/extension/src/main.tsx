@@ -242,6 +242,8 @@ const apiErrors: Record<string, string> = {
   AI_VISUAL_FAILED: "图表识别失败，请稍后重试。",
   AI_UPSTREAM_TIMEOUT: "AI 图表分析超时，额度已退回，请稍后重试或切换模型。",
   REQUEST_TIMEOUT: "请求超时，请检查网络后重试。",
+  MINERU_FILE_TOO_LARGE: "当前 PDF 超过 15MB，暂时无法通过安全代理上传至 MinerU。",
+  MINERU_UPLOAD_FAILED: "PDF 上传到 MinerU 失败，请稍后重试。",
 };
 function readableApiError(error: unknown, fallback: string) { const code=error instanceof Error?error.message:String(error||""); return apiErrors[code]||fallback; }
 
@@ -1076,17 +1078,14 @@ function App() {
   async function runMineruLayout() {
     if (!pdf || !pdfBytes.current || layoutState.state === "preparing" || layoutState.state === "uploading" || layoutState.state === "processing") return;
     try {
-      setLayoutState({ state: "preparing", message: "正在创建 MinerU 解析任务…" });
-      const preparedResponse = await functionRequest("mineru-layout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "prepare", name: fileName || "document.pdf" }) });
-      const prepared = await preparedResponse.json(); if (!preparedResponse.ok) throw new Error(prepared.error || "MINERU_PREPARE_FAILED");
-      setLayoutState({ state: "uploading", message: "正在上传 PDF 进行版面分析…" });
-      const uploadResponse = await fetch(prepared.uploadUrl, { method: "PUT", body: pdfBytes.current, headers: { "Content-Type": "application/pdf" } });
-      if (!uploadResponse.ok) throw new Error("MINERU_UPLOAD_FAILED");
+      setLayoutState({ state: "uploading", message: "正在通过安全通道上传 PDF…" });
+      const uploadResponse = await functionRequest("mineru-upload", { method: "POST", headers: { "Content-Type": "application/pdf", "X-File-Name": fileName || "document.pdf" }, body: pdfBytes.current });
+      const uploaded = await uploadResponse.json(); if (!uploadResponse.ok) throw new Error(uploaded.error || "MINERU_UPLOAD_FAILED");
       setLayoutState({ state: "processing", message: "MinerU 正在识别图表与表格…" });
       let status: any;
       for (let attempt = 0; attempt < 60; attempt += 1) {
         await new Promise(resolve => window.setTimeout(resolve, 3000));
-        const statusResponse = await functionRequest("mineru-layout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "status", batchId: prepared.batchId }) });
+        const statusResponse = await functionRequest("mineru-layout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "status", batchId: uploaded.batchId }) });
         status = await statusResponse.json(); if (!statusResponse.ok) throw new Error(status.error || "MINERU_STATUS_FAILED");
         if (status.state === "done" || status.state === "failed") break;
         const progress = status.progress; setLayoutState({ state: "processing", message: progress?.total_pages ? `MinerU 正在解析 ${progress.extracted_pages || 0}/${progress.total_pages} 页…` : "MinerU 正在识别图表与表格…" });

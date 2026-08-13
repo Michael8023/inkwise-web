@@ -24,3 +24,5 @@ verify_jwt = true
 verify_jwt = true
 [functions.mineru-layout]
 verify_jwt = true
+[functions.mineru-upload]
+verify_jwt = true
