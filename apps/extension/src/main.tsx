@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import ReactMarkdown from "react-markdown";
 import * as pdfjsLib from "pdfjs-dist";
 import JSZip from "jszip";
+import * as THREE from "three";
 import { functionRequest, supabase, supabaseConfigured } from "./api";
 import {
   ChevronDown,
@@ -96,6 +97,18 @@ type ChatMessage = { role: "user" | "assistant"; content: string };
 type AuthSession = { user: { id: string; email?: string; user_metadata?: Record<string, unknown> } };
 type Usage = { plan: string; creditsRemaining: number; periodEnd: string | null };
 const PUBLIC_READER_ORIGIN = "https://www.inkwise.site";
+
+function modelBrand(modelId: string) {
+  const value = modelId.toLowerCase();
+  if (/claude|anthropic/.test(value)) return { src: "/brand/models/anthropic.svg", alt: "Claude" };
+  if (/gemini|google/.test(value)) return { src: "/brand/models/googlegemini.svg", alt: "Gemini" };
+  if (/gpt|openai|^o[1-9]/.test(value)) return { src: "/brand/models/openai.svg", alt: "GPT" };
+  if (/grok|xai/.test(value)) return { src: "/brand/models/xai.svg", alt: "xAI" };
+  if (/deepseek/.test(value)) return { src: "/brand/models/deepseek.svg", alt: "DeepSeek" };
+  if (/qwen|alibaba/.test(value)) return { src: "/brand/models/alibaba.svg", alt: "Alibaba" };
+  if (/mistral/.test(value)) return { src: "/brand/models/mistral.svg", alt: "Mistral AI" };
+  return null;
+}
 
 function cropPdfCanvas(source: HTMLCanvasElement, area: VisualRegion["area"]) {
   const sx = Math.round(area.x * source.width), sy = Math.round(area.y * source.height);
@@ -317,6 +330,9 @@ const apiErrors: Record<string, string> = {
   REQUEST_TIMEOUT: "请求超时，请检查网络后重试。",
   MINERU_FILE_TOO_LARGE: "当前 PDF 超过 15MB，暂时无法进行智能版面分析。",
   MINERU_UPLOAD_FAILED: "文档上传失败，请稍后重试。",
+  DOI_PDF_NOT_FOUND: "该 DOI 对应的 PDF 暂时无法获取，出版商和学术资源库均未能提供访问。请尝试手动下载后导入。",
+  PDF_UPSTREAM_401: "该论文需要订阅权限，无法自动获取。请通过机构访问或手动下载后导入。",
+  PDF_UPSTREAM_403: "该论文访问受限，无法自动获取。请通过机构访问或手动下载后导入。",
 };
 function readableApiError(error: unknown, fallback: string) { const code=error instanceof Error?error.message:String(error||""); return apiErrors[code]||fallback; }
 
@@ -359,12 +375,45 @@ function UrlImportDialog({ value, error, loading, onChange, onClose, onSubmit }:
   return <div className="auth-backdrop url-import-backdrop"><form className="auth-dialog url-import-dialog" onSubmit={event => { event.preventDefault(); onSubmit(); }}>
     <button type="button" className="popover-close" onClick={onClose} aria-label="关闭导入窗口"><X size={16} /></button>
     <div className="url-import-icon"><Link size={20} /></div>
-    <div className="url-import-heading"><span>INKWISE / IMPORT</span><h2>导入论文链接</h2><p>粘贴公开 PDF 的直链，我们会在当前阅读器中打开。</p></div>
-    <label className="url-import-field">PDF 链接<input type="url" required autoFocus placeholder="https://arxiv.org/pdf/..." value={value} onChange={event => onChange(event.target.value)} /></label>
+    <div className="url-import-heading"><span>INKWISE / IMPORT</span><h2>导入论文链接</h2><p>支持公开 PDF 链接、doi.org 链接或纯 DOI；我们会自动从出版商或学术资源库获取 PDF。</p></div>
+    <label className="url-import-field">PDF 或 DOI<input type="text" required autoFocus placeholder="https://doi.org/10.xxxx/... 或 10.xxxx/..." value={value} onChange={event => onChange(event.target.value)} /></label>
     {error && <p className="url-import-error">{error}</p>}
     <button className="url-import-submit" type="submit" disabled={loading}>{loading ? "正在导入…" : "在当前页面打开"}<ChevronRight size={17} /></button>
-    <p className="url-import-help">支持公开链接；受跨域限制的站点需登录后导入。</p>
+    <p className="url-import-help">DOI 解析会先尝试出版商官方渠道，如不可访问则自动从 Sci-Hub 等学术资源库获取。</p>
   </form></div>;
+}
+
+function ExtensionAutoOpenToggle() {
+  const [available, setAvailable] = useState(false);
+  const [enabled, setEnabled] = useState(true);
+  useEffect(() => {
+    const extension = (globalThis as any).chrome;
+    if (!extension?.storage?.sync) return;
+    setAvailable(true);
+    const load = () => extension.storage.sync.get({ autoOpenPdf: true }, (settings: { autoOpenPdf?: boolean }) => setEnabled(settings.autoOpenPdf !== false));
+    load();
+    const listener = (changes: Record<string, { newValue?: unknown }>, area: string) => {
+      if (area === "sync" && changes.autoOpenPdf) setEnabled(changes.autoOpenPdf.newValue !== false);
+    };
+    extension.storage.onChanged.addListener(listener);
+    return () => extension.storage.onChanged.removeListener(listener);
+  }, []);
+  if (!available) return null;
+  return <button className={`extension-auto-open-toggle${enabled ? " enabled" : ""}`} type="button" role="switch" aria-checked={enabled} title={enabled ? "关闭自动使用墨知打开 PDF" : "启用自动使用墨知打开 PDF"} onClick={() => {
+    const next = !enabled;
+    setEnabled(next);
+    (globalThis as any).chrome.storage.sync.set({ autoOpenPdf: next });
+  }}><span className="extension-auto-open-track" aria-hidden="true"><span className="extension-auto-open-thumb"><img src="/brand/inkwise-mark.svg" alt="" /></span></span></button>;
+}
+
+function NativePdfToolbar({ page, total, onPage, onZoom, onFullscreen }: { page: string; total: number; onPage: (page: number) => void; onZoom: (delta: number) => void; onFullscreen: () => void }) {
+  const [value, setValue] = useState(page);
+  useEffect(() => setValue(page), [page]);
+  return <header className="native-pdf-toolbar" aria-label="PDF 工具栏">
+    <div className="native-toolbar-group native-toolbar-left"><button title="切换边栏"><PanelLeft size={20} /></button><i /><button title="绘制"><Highlighter size={20} /></button><button className="native-draw-label">绘制<ChevronDown size={14} /></button><i /><button title="橡皮擦"><X size={19} /></button><button title="朗读"><MessageSquare size={20} /></button></div>
+    <form className="native-toolbar-center" onSubmit={event => { event.preventDefault(); onPage(Number(value)); }}><button type="button" title="缩小" onClick={() => onZoom(-.1)}><Minus size={19} /></button><button type="button" title="放大" onClick={() => onZoom(.1)}><Plus size={19} /></button><i /><input aria-label="页码" inputMode="numeric" value={value} onChange={event => setValue(event.target.value.replace(/\D/g, ""))} onBlur={() => setValue(page)} /><span>/ {total}</span><i /><button type="button" title="旋转"><RefreshCw size={19} /></button><button type="button" title="适应页面"><Maximize size={18} /></button></form>
+    <div className="native-toolbar-group native-toolbar-right"><button title="搜索"><Search size={20} /></button><i /><button title="打印"><FileText size={19} /></button><button title="下载"><Download size={19} /></button><i /><button title="全屏" onClick={onFullscreen}><Maximize size={20} /></button><button title="设置"><SlidersHorizontal size={20} /></button></div>
+  </header>;
 }
 
 function IconButton({
@@ -438,6 +487,145 @@ function WelcomeScreen({
       <footer className="welcome-footer"><span>支持本地 PDF 拖放</span><span>·</span><span>你的文档与你同在</span></footer>
     </main>
   );
+}
+
+/** A self-running 3D transition inspired by the supplied mail-delivery scene.
+ * The incoming PDF replaces the letter; the destination is Inkwise's reader. */
+function SpaceReaderLoadingScene() {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.Fog(0x131125, 12, 34);
+    const camera = new THREE.PerspectiveCamera(34, 1, .1, 100);
+    camera.position.set(7.6, 4.7, 12.5);
+    camera.lookAt(0, .2, 0);
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.15;
+
+    const resize = () => {
+      const { width, height } = canvas.getBoundingClientRect();
+      renderer.setSize(Math.max(1, width), Math.max(1, height), false);
+      camera.aspect = Math.max(1, width) / Math.max(1, height);
+      camera.updateProjectionMatrix();
+    };
+    resize();
+    const observer = new ResizeObserver(resize); observer.observe(canvas);
+
+    scene.add(new THREE.HemisphereLight(0xece6ff, 0x16112e, 2.4));
+    const key = new THREE.DirectionalLight(0xffedcf, 4.1); key.position.set(-6, 9, 7); key.castShadow = true; key.shadow.mapSize.set(1024, 1024); scene.add(key);
+    const violet = new THREE.PointLight(0xa275ff, 32, 16); violet.position.set(3, 4, 3); scene.add(violet);
+    const cyan = new THREE.PointLight(0x5ee7df, 18, 12); cyan.position.set(-5, 2, 1); scene.add(cyan);
+
+    const stars = new Float32Array(720);
+    for (let index = 0; index < stars.length; index += 3) {
+      const radius = 16 + Math.random() * 15; const theta = Math.random() * Math.PI * 2; const y = (Math.random() - .12) * 15;
+      stars[index] = Math.cos(theta) * radius; stars[index + 1] = y; stars[index + 2] = Math.sin(theta) * radius - 7;
+    }
+    const starGeometry = new THREE.BufferGeometry(); starGeometry.setAttribute("position", new THREE.BufferAttribute(stars, 3));
+    scene.add(new THREE.Points(starGeometry, new THREE.PointsMaterial({ color: 0xded6ff, size: .07, transparent: true, opacity: .9 })));
+
+    const planet = new THREE.Mesh(new THREE.SphereGeometry(15, 64, 32), new THREE.MeshStandardMaterial({ color: 0x332657, roughness: .92, metalness: .03 }));
+    planet.position.set(0, -18.4, -3); planet.receiveShadow = true; scene.add(planet);
+    const planetGlow = new THREE.Mesh(new THREE.SphereGeometry(15.18, 48, 24), new THREE.MeshBasicMaterial({ color: 0x7b62cd, transparent: true, opacity: .09, side: THREE.BackSide }));
+    planetGlow.position.copy(planet.position); scene.add(planetGlow);
+
+    const machine = new THREE.Group(); machine.position.set(.45, -1.15, 0); machine.rotation.y = -.11; scene.add(machine);
+    const dark = new THREE.MeshStandardMaterial({ color: 0x171937, roughness: .42, metalness: .34 });
+    const shell = new THREE.MeshStandardMaterial({ color: 0x67d6d3, roughness: .3, metalness: .08 });
+    const violetMetal = new THREE.MeshStandardMaterial({ color: 0x7657e8, roughness: .28, metalness: .25 });
+    const whiteMetal = new THREE.MeshStandardMaterial({ color: 0xf5f1ff, roughness: .38, metalness: .08 });
+    const glass = new THREE.MeshPhysicalMaterial({ color: 0x95dcf0, roughness: .09, metalness: .08, transparent: true, opacity: .38, transmission: .18, thickness: .24 });
+    const paper = new THREE.MeshStandardMaterial({ color: 0xfffdf5, roughness: .65 });
+    const outline = (mesh: THREE.Mesh, color = 0x26214b, opacity = .23) => { const edges = new THREE.LineSegments(new THREE.EdgesGeometry(mesh.geometry, 28), new THREE.LineBasicMaterial({ color, transparent: true, opacity })); mesh.add(edges); return mesh; };
+    const bodyShape = new THREE.Shape();
+    bodyShape.moveTo(-2.72, -1.55); bodyShape.lineTo(2.72, -1.55); bodyShape.lineTo(2.72, .55);
+    bodyShape.bezierCurveTo(2.72, 1.78, 1.5, 2.48, 0, 2.48); bodyShape.bezierCurveTo(-1.5, 2.48, -2.72, 1.78, -2.72, .55); bodyShape.closePath();
+    const bodyGeometry = new THREE.ExtrudeGeometry(bodyShape, { depth: 2.7, bevelEnabled: true, bevelSegments: 5, bevelSize: .11, bevelThickness: .11, curveSegments: 28 }); bodyGeometry.translate(0, 0, -1.35);
+    const body = outline(new THREE.Mesh(bodyGeometry, shell)); body.position.y = .12; body.castShadow = body.receiveShadow = true; machine.add(body);
+    const lowerBand = outline(new THREE.Mesh(new THREE.BoxGeometry(5.58, .62, 2.86), violetMetal)); lowerBand.position.y = -1.18; lowerBand.castShadow = true; machine.add(lowerBand);
+    const frame = outline(new THREE.Mesh(new THREE.BoxGeometry(4.5, 2.42, .2), violetMetal)); frame.position.set(0, .78, 1.47); frame.castShadow = true; machine.add(frame);
+    const display = new THREE.Mesh(new THREE.BoxGeometry(4.08, 2.02, .13), dark); display.position.set(0, .78, 1.59); machine.add(display);
+    const displayGlass = new THREE.Mesh(new THREE.BoxGeometry(3.94, 1.88, .055), glass); displayGlass.position.set(0, .78, 1.68); machine.add(displayGlass);
+    const pageInDisplay = new THREE.Mesh(new THREE.PlaneGeometry(2.12, 1.56), paper); pageInDisplay.position.set(0, .78, 1.72); machine.add(pageInDisplay);
+    const titleStripe = new THREE.Mesh(new THREE.PlaneGeometry(1.18, .1), new THREE.MeshBasicMaterial({ color: 0x7657e8 })); titleStripe.position.set(0, 1.3, 1.74); machine.add(titleStripe);
+    const slotFrame = outline(new THREE.Mesh(new THREE.BoxGeometry(3.08, .56, .34), whiteMetal), 0x33285e, .28); slotFrame.position.set(0, -1.05, 1.52); machine.add(slotFrame);
+    const slot = new THREE.Mesh(new THREE.BoxGeometry(2.55, .18, .38), new THREE.MeshStandardMaterial({ color: 0x080713, roughness: .24, metalness: .5 })); slot.position.set(0, -1.04, 1.72); machine.add(slot);
+    const slotLight = new THREE.Mesh(new THREE.BoxGeometry(2.45, .035, .04), new THREE.MeshBasicMaterial({ color: 0xbba3ff, transparent: true, opacity: .82 })); slotLight.position.set(0, -.93, 1.94); machine.add(slotLight);
+    const logoDisc = new THREE.Mesh(new THREE.CylinderGeometry(.4, .4, .13, 32), new THREE.MeshStandardMaterial({ color: 0xffd75e, roughness: .3, metalness: .12, emissive: 0x6b4910, emissiveIntensity: .18 })); logoDisc.position.set(0, 2.32, 1.25); logoDisc.rotation.x = Math.PI / 2; machine.add(logoDisc);
+    const logoMark = new THREE.Mesh(new THREE.TorusGeometry(.16, .052, 12, 24, Math.PI * 1.55), new THREE.MeshBasicMaterial({ color: 0x422d83 })); logoMark.position.set(.02, 2.33, 1.34); logoMark.rotation.z = .34; machine.add(logoMark);
+    const labelCanvas = document.createElement("canvas"); labelCanvas.width = 512; labelCanvas.height = 96;
+    const labelContext = labelCanvas.getContext("2d");
+    if (labelContext) { labelContext.fillStyle = "#f8f5ff"; labelContext.font = "700 50px Inter, sans-serif"; labelContext.textAlign = "center"; labelContext.fillText("INKWISE", 256, 63); }
+    const labelTexture = new THREE.CanvasTexture(labelCanvas); labelTexture.colorSpace = THREE.SRGBColorSpace;
+    const label = new THREE.Mesh(new THREE.PlaneGeometry(1.75, .33), new THREE.MeshBasicMaterial({ map: labelTexture, transparent: true })); label.position.set(0, 1.88, 1.53); machine.add(label);
+    const base = outline(new THREE.Mesh(new THREE.CylinderGeometry(2.55, 3.05, .55, 40), new THREE.MeshStandardMaterial({ color: 0xff735f, roughness: .42, metalness: .12 }))); base.position.y = -1.72; base.castShadow = base.receiveShadow = true; machine.add(base);
+    for (const x of [-1.72, 1.72]) { const leg = outline(new THREE.Mesh(new THREE.CylinderGeometry(.18, .31, 1.48, 16), new THREE.MeshStandardMaterial({ color: 0xffd75e, roughness: .4, metalness: .08 }))); leg.position.set(x, -2.4, 0); leg.rotation.z = x > 0 ? -.16 : .16; leg.castShadow = true; machine.add(leg); }
+    const halo = new THREE.Mesh(new THREE.TorusGeometry(3.55, .035, 10, 64), new THREE.MeshBasicMaterial({ color: 0xa98cf0, transparent: true, opacity: .36 })); halo.position.y = -1.51; halo.rotation.x = Math.PI / 2; scene.add(halo);
+
+    const pdfGroup = new THREE.Group(); scene.add(pdfGroup);
+    const pdfSheet = new THREE.Mesh(new THREE.BoxGeometry(2.05, 2.72, .08), paper); pdfSheet.castShadow = true; pdfGroup.add(pdfSheet);
+    const pdfHeader = new THREE.Mesh(new THREE.PlaneGeometry(1.26, .1), new THREE.MeshBasicMaterial({ color: 0x7657e8 })); pdfHeader.position.set(0, .72, .05); pdfGroup.add(pdfHeader);
+    const pdfArt = new THREE.Mesh(new THREE.PlaneGeometry(1.5, .86), new THREE.MeshBasicMaterial({ color: 0xd6f1ed })); pdfArt.position.set(0, -.2, .05); pdfGroup.add(pdfArt);
+    pdfGroup.position.set(-8.2, 2.4, 4.2); pdfGroup.rotation.set(.18, -.62, -.32);
+
+    const flightStart = new THREE.Vector3(-8.2, 2.4, 4.2);
+    const flightQuaternion = pdfGroup.quaternion.clone();
+    const flatLocalQuaternion = new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 2, 0, 0));
+    const machineQuaternion = new THREE.Quaternion();
+    const flatWorldQuaternion = new THREE.Quaternion();
+    const slotWorld = new THREE.Vector3();
+    const frontDirection = new THREE.Vector3();
+    const approachPoint = new THREE.Vector3();
+    const insertionPoint = new THREE.Vector3();
+    const start = performance.now(); let frameId = 0;
+    const render = (now: number) => {
+      const elapsed = Math.min((now - start) / 2500, 1);
+      const approach = Math.min(1, Math.max(0, (elapsed - .06) / .56));
+      const insertion = Math.min(1, Math.max(0, (elapsed - .62) / .3));
+      const approachEase = approach < .5 ? 4 * approach ** 3 : 1 - ((-2 * approach + 2) ** 3) / 2;
+      const insertionEase = insertion < .5 ? 4 * insertion ** 3 : 1 - ((-2 * insertion + 2) ** 3) / 2;
+
+      // Read the slot's actual world transform, as the reference animation
+      // does. This keeps the sheet and opening physically aligned even while
+      // the machine moves or rotates.
+      const impact = Math.sin(insertion * Math.PI) * .075;
+      machine.position.y = -1.15 + impact;
+      machine.rotation.y = -.11 + Math.sin(elapsed * Math.PI * 2) * .012;
+      machine.rotation.z = Math.sin(insertion * Math.PI * 2) * .018;
+      machine.updateMatrixWorld(true);
+      slot.getWorldPosition(slotWorld);
+      machine.getWorldQuaternion(machineQuaternion);
+      flatWorldQuaternion.copy(machineQuaternion).multiply(flatLocalQuaternion);
+      frontDirection.set(0, 0, 1).applyQuaternion(machineQuaternion).normalize();
+      approachPoint.copy(slotWorld).addScaledVector(frontDirection, 1.43);
+      approachPoint.y += .015;
+      insertionPoint.copy(slotWorld).addScaledVector(frontDirection, -1.48);
+
+      if (insertion <= 0) {
+        pdfGroup.position.lerpVectors(flightStart, approachPoint, approachEase);
+        pdfGroup.quaternion.slerpQuaternions(flightQuaternion, flatWorldQuaternion, approachEase);
+      } else {
+        pdfGroup.position.lerpVectors(approachPoint, insertionPoint, insertionEase);
+        pdfGroup.quaternion.copy(flatWorldQuaternion);
+      }
+      pdfGroup.scale.setScalar(1);
+      pdfGroup.visible = insertion < .995;
+      halo.rotation.z = elapsed * .55;
+      camera.position.x = 7.6 - elapsed * .35; camera.lookAt(.1, .1, 0);
+      renderer.render(scene, camera); frameId = requestAnimationFrame(render);
+    };
+    frameId = requestAnimationFrame(render);
+    return () => { cancelAnimationFrame(frameId); observer.disconnect(); starGeometry.dispose(); labelTexture.dispose(); renderer.dispose(); };
+  }, []);
+  return <canvas ref={canvasRef} className="document-loading-canvas" aria-hidden="true" />;
 }
 
 function OutlineTree({
@@ -1057,7 +1245,6 @@ function App() {
   const [mineruRegions, setMineruRegions] = useState<VisualRegion[]>([]);
   const [mineruReady, setMineruReady] = useState(false);
   const [layoutState, setLayoutState] = useState<LayoutState>({ state: "idle" });
-  const [layoutNoticeOpen, setLayoutNoticeOpen] = useState(true);
   const [layoutNoticeVisible, setLayoutNoticeVisible] = useState(false);
   const pdfBytes = useRef<ArrayBuffer | null>(null);
   const autoLayoutDocument = useRef("");
@@ -1069,7 +1256,6 @@ function App() {
   const [pdfOpening, setPdfOpening] = useState(false);
   const [models, setModels] = useState<Array<{ id: string; name: string }>>([]);
   const [model, setModel] = useState("");
-  const [defaultModel, setDefaultModel] = useState("");
   const [summary, setSummary] = useState<{
     short?: string;
     full?: string;
@@ -1099,6 +1285,7 @@ function App() {
   const [paperUrl, setPaperUrl] = useState("");
   const [urlLoading, setUrlLoading] = useState(false);
   const [urlError, setUrlError] = useState("");
+  const [nativePdfView, setNativePdfView] = useState(() => new URL(window.location.href).searchParams.get("mode") === "compact");
 
   useEffect(() => {
     const trustedOrigins = new Set([window.location.origin, PUBLIC_READER_ORIGIN]);
@@ -1133,11 +1320,28 @@ function App() {
     window.localStorage.setItem("inkwise-theme", theme);
   }, [theme]);
   useEffect(() => {
-    const url = new URL(window.location.href).searchParams.get("openPdfUrl");
-    if (!url) return;
+    const extension = (globalThis as any).chrome;
+    if (!extension?.storage?.sync) return;
+    const update = (value: boolean | undefined) => setNativePdfView(value === false);
+    extension.storage.sync.get({ autoOpenPdf: true }, (settings: { autoOpenPdf?: boolean }) => update(settings.autoOpenPdf));
+    const listener = (changes: Record<string, { newValue?: unknown }>, area: string) => {
+      if (area === "sync" && changes.autoOpenPdf) update(changes.autoOpenPdf.newValue as boolean | undefined);
+    };
+    extension.storage.onChanged.addListener(listener);
+    return () => extension.storage.onChanged.removeListener(listener);
+  }, []);
+  useEffect(() => {
+    if (!nativePdfView) return;
+    setVisualMode(false); setSelections([]); setVisualSelections([]); setRailOpen(false); setPanelOpen(false);
+  }, [nativePdfView]);
+  useEffect(() => {
+    const currentUrl = new URL(window.location.href);
+    const url = currentUrl.searchParams.get("openPdfUrl");
+    const openAccount = currentUrl.searchParams.get("account") === "1";
+    if (!url && !openAccount) return;
     window.history.replaceState({}, "", window.location.pathname);
-    setPaperUrl(url);
-    void loadPdfUrl(url);
+    if (openAccount) setAuthOpen(true);
+    if (url) { setPaperUrl(url); void loadPdfUrl(url); }
   }, []);
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session as AuthSession | null));
@@ -1159,10 +1363,7 @@ function App() {
         ];
         const availableModels = Array.isArray(result.models) && result.models.length ? result.models : fallbackModels;
         setModels(availableModels);
-        const fallbackModel =
-          result.defaultModel || availableModels[0]?.id || "";
-        setDefaultModel(fallbackModel);
-        setModel(fallbackModel);
+        setModel(result.defaultModel || availableModels[0]?.id || "");
       })
       .catch(() => undefined);
   }, []);
@@ -1171,10 +1372,10 @@ function App() {
     refreshUsage();
   }, [session]);
   useEffect(() => {
-    if (!session || !documentReady || !documentId || autoLayoutDocument.current === documentId) return;
+    if (nativePdfView || !session || !documentReady || !documentId || autoLayoutDocument.current === documentId) return;
     autoLayoutDocument.current = documentId;
     void runMineruLayout();
-  }, [session, documentReady, documentId]);
+  }, [nativePdfView, session, documentReady, documentId]);
   useEffect(() => {
     if (!documentReady) return;
     // Let the ink bloom complete before removing the transition layer. This
@@ -1183,8 +1384,9 @@ function App() {
     return () => window.clearTimeout(timer);
   }, [documentReady]);
   useEffect(() => {
-    if (layoutState.state !== "done") return;
-    const timer = window.setTimeout(() => setLayoutNoticeVisible(false), 3600);
+    if (layoutState.state !== "done" && layoutState.state !== "error") return;
+    setLayoutNoticeVisible(true);
+    const timer = window.setTimeout(() => setLayoutNoticeVisible(false), 3800);
     return () => window.clearTimeout(timer);
   }, [layoutState.state]);
   useEffect(() => {
@@ -1282,7 +1484,7 @@ function App() {
   async function openPdfData(data: ArrayBuffer, name: string) {
     try {
       setPdfOpening(true);
-      setSelections([]); setHighlights([]); setVisualSelections([]); setVisualMode(false); setMineruRegions([]); setMineruReady(false); setLayoutState({ state: "idle" }); setLayoutNoticeOpen(true); setLayoutNoticeVisible(false); autoLayoutDocument.current = "";
+      setSelections([]); setHighlights([]); setVisualSelections([]); setVisualMode(false); setMineruRegions([]); setMineruReady(false); setLayoutState({ state: "idle" }); setLayoutNoticeVisible(false); autoLayoutDocument.current = "";
       setDocumentReady(false);
       setFileName(name);
       pdfBytes.current = data.slice(0);
@@ -1356,19 +1558,25 @@ function App() {
     if (!pdf || !pdfBytes.current || layoutState.state === "preparing" || layoutState.state === "uploading" || layoutState.state === "processing" || layoutState.state === "downloading") return;
     try {
       const bytes = pdfBytes.current;
-      setLayoutNoticeOpen(true); setLayoutNoticeVisible(true);
-      setLayoutState({ state: "preparing", message: "正在准备智能版面分析…", progress: 4 });
+      setLayoutNoticeVisible(false);
+      setLayoutState({ state: "preparing", message: "正在优化您的阅读体验…", progress: 4 });
       const preparedResponse = await functionRequest("mineru-layout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "prepare", name: fileName || "document.pdf" }) });
       const prepared = await preparedResponse.json(); if (!preparedResponse.ok) throw new Error(prepared.error || "MINERU_PREPARE_FAILED");
-      setLayoutState({ state: "uploading", message: "正在上传文档…", progress: 8 });
+      setLayoutState({ state: "uploading", message: "正在优化您的阅读体验（准备文档）…", progress: 8 });
       await new Promise<void>((resolve, reject) => {
         const request = new XMLHttpRequest();
-        const uploadTarget = new URL("/api/mineru-upload", window.location.origin);
+        // Packaged extensions use a chrome-extension:// origin and cannot
+        // serve the Worker upload route locally. Route their upload through
+        // the deployed Inkwise Worker instead.
+        const uploadProxyOrigin = window.location.protocol === "chrome-extension:"
+          ? PUBLIC_READER_ORIGIN
+          : window.location.origin;
+        const uploadTarget = new URL("/api/mineru-upload", uploadProxyOrigin);
         uploadTarget.searchParams.set("target", prepared.uploadUrl);
         uploadTarget.searchParams.set("headers", btoa(JSON.stringify(prepared.uploadHeaders || {})));
         request.open("PUT", uploadTarget.toString());
         request.upload.onprogress = event => {
-          if (event.lengthComputable) setLayoutState({ state: "uploading", message: `正在上传文档… ${Math.round(event.loaded / event.total * 100)}%`, progress: 8 + Math.round(event.loaded / event.total * 32) });
+          if (event.lengthComputable) setLayoutState({ state: "uploading", message: `正在优化您的阅读体验（准备文档 ${Math.round(event.loaded / event.total * 100)}%）`, progress: 8 + Math.round(event.loaded / event.total * 32) });
         };
         request.onerror = () => reject(new Error("MINERU_BROWSER_UPLOAD_FAILED"));
         request.onload = () => {
@@ -1382,7 +1590,7 @@ function App() {
         };
         request.send(bytes);
       });
-      setLayoutState({ state: "processing", message: "正在识别图表、表格与公式…", progress: 40 });
+      setLayoutState({ state: "processing", message: "正在优化您的阅读体验（理解页面结构）…", progress: 40 });
       let status: any;
       for (let attempt = 0; attempt < 60; attempt += 1) {
         await new Promise(resolve => window.setTimeout(resolve, 3000));
@@ -1391,10 +1599,10 @@ function App() {
         if (status.state === "done" || status.state === "failed") break;
         const progress = status.progress;
         const parsed = progress?.total_pages ? Math.min(94, 40 + Math.round(54 * (progress.extracted_pages || 0) / progress.total_pages)) : Math.min(90, 43 + attempt);
-        setLayoutState({ state: "processing", message: progress?.total_pages ? `正在解析 ${progress.extracted_pages || 0}/${progress.total_pages} 页…` : "正在识别图表、表格与公式…", progress: parsed });
+        setLayoutState({ state: "processing", message: progress?.total_pages ? `正在优化您的阅读体验（处理 ${progress.extracted_pages || 0}/${progress.total_pages} 页）…` : "正在优化您的阅读体验（理解页面结构）…", progress: parsed });
       }
       if (status?.state !== "done" || !status.ready) throw new Error(status?.error || "MINERU_TIMEOUT");
-      setLayoutState({ state: "downloading", message: "正在整理分析结果…", progress: 96 });
+      setLayoutState({ state: "downloading", message: "正在优化您的阅读体验（整理结果）…", progress: 96 });
       const zipResponse = await functionRequest("mineru-layout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "download", batchId: prepared.batchId }) });
       if (!zipResponse.ok) {
         const result = await zipResponse.json().catch(() => ({}));
@@ -1408,10 +1616,10 @@ function App() {
       const parsedOutline = collectMineruOutline(raw, pdf.numPages);
       if (parsedOutline.length) setOutline(parsedOutline);
       setMineruRegions(regions); setMineruReady(true);
-      setLayoutState({ state: "done", message: regions.length ? `已识别 ${regions.filter((item: VisualRegion) => item.kind === "image").length} 张图片、${regions.filter((item: VisualRegion) => item.kind === "table").length} 个表格与 ${regions.filter((item: VisualRegion) => item.kind === "formula").length} 条公式` : "智能版面分析已完成，未发现可交互结构区域。", progress: 100 });
+      setLayoutState({ state: "done", message: regions.length ? `阅读体验优化完成：已识别 ${regions.filter((item: VisualRegion) => item.kind === "image").length} 张图片、${regions.filter((item: VisualRegion) => item.kind === "table").length} 个表格与 ${regions.filter((item: VisualRegion) => item.kind === "formula").length} 条公式` : "阅读体验优化完成，未发现可交互结构区域。", progress: 100 });
     } catch (error) {
       const message = error instanceof Error ? error.message : "MINERU_REQUEST_FAILED";
-      setLayoutState({ state: "error", message: message.includes("MINERU_API_TOKEN_NOT_CONFIGURED") ? "智能版面分析暂不可用，仍使用本地识别。" : "智能版面分析暂时失败，仍可使用本地识别。" });
+      setLayoutState({ state: "error", message: message.includes("MINERU_API_TOKEN_NOT_CONFIGURED") ? "阅读体验优化暂不可用，仍可使用本地识别。" : "阅读体验优化暂未完成，仍可使用本地识别。" });
     }
   }
   function validatePdfUrl(value: string) {
@@ -1422,26 +1630,45 @@ function App() {
     }
     return parsed;
   }
+  function normalizePaperUrl(value: string) {
+    const trimmed = value.trim();
+    if (/^10\.\d{4,9}\/[\S]+$/i.test(trimmed)) return `https://doi.org/${trimmed}`;
+    return trimmed;
+  }
+  function isDoiLink(url: URL) { return ["doi.org", "dx.doi.org"].includes(url.hostname.toLowerCase()) && /^\/10\.\d{4,9}\//i.test(url.pathname); }
   async function loadPdfUrl(value: string) {
     setUrlError("");
     let parsed: URL;
-    try { parsed = validatePdfUrl(value.trim()); } catch (error) { setUrlError(error instanceof Error ? error.message : "链接格式不正确。"); return; }
+    try { parsed = validatePdfUrl(normalizePaperUrl(value)); } catch (error) { setUrlError(error instanceof Error ? error.message : "链接格式不正确。"); return; }
     setUrlLoading(true);
     try {
       let response: Response;
-      try {
-        response = await fetch(parsed.toString());
-        if (!response.ok) throw new Error(`HTTP_${response.status}`);
-      } catch {
-        if (!session) throw new Error("该站点不允许跨域读取，请登录后通过安全代理导入。");
+      if (isDoiLink(parsed)) {
+        if (!session) throw new Error("解析 DOI 需登录后通过安全代理访问出版商页面。");
         response = await functionRequest("pdf-fetch", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url: parsed.toString() }),
+          body: JSON.stringify({ url: parsed.toString(), resolveDoi: true }),
         });
         if (!response.ok) {
           const result = await response.json().catch(() => ({}));
-          throw new Error(result.error || "PDF_URL_FETCH_FAILED");
+          throw new Error(result.error || "DOI_RESOLVE_FAILED");
+        }
+      } else {
+        try {
+          response = await fetch(parsed.toString());
+          if (!response.ok) throw new Error(`HTTP_${response.status}`);
+        } catch {
+          if (!session) throw new Error("该站点不允许跨域读取，请登录后通过安全代理导入。");
+          response = await functionRequest("pdf-fetch", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url: parsed.toString() }),
+          });
+          if (!response.ok) {
+            const result = await response.json().catch(() => ({}));
+            throw new Error(result.error || "PDF_URL_FETCH_FAILED");
+          }
         }
       }
       const contentType = response.headers.get("content-type") || "";
@@ -1465,7 +1692,7 @@ function App() {
     await loadPdfUrl(paperUrl);
   }
   async function requestSummary(kind: "short" | "full") {
-    if (!documentReady || !defaultModel || !documentId) return;
+    if (!documentReady || !model || !documentId) return;
     setSummary((current) => ({ ...current, loading: kind }));
     try {
       if (!session) throw new Error("AUTH_REQUIRED");
@@ -1474,7 +1701,7 @@ function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           kind,
-          model: defaultModel,
+          model,
           documentText: documentText.slice(0, 120000),
           requestId: crypto.randomUUID(),
         }),
@@ -1702,18 +1929,54 @@ function App() {
         <input ref={fileInput} className="welcome-file-input" type="file" accept="application/pdf" onChange={(event) => event.target.files?.[0] && openFile(event.target.files[0])} />
         {authOpen && (session ? <AccountDialog session={session} usage={usage} onClose={() => setAuthOpen(false)} onSignOut={() => { signOut(); setAuthOpen(false); }} /> : <AuthDialog mode={authMode} email={authEmail} password={authPassword} name={authName} code={authCode} error={authError} notice={authNotice} verifying={authVerifying} onClose={() => setAuthOpen(false)} onSubmit={submitAuth} onVerify={verifyEmailCode} onResend={resendEmailCode} onModeChange={(nextMode) => { setAuthMode(nextMode); setAuthVerifying(false); setAuthError(""); setAuthNotice(""); }} onEmail={setAuthEmail} onPassword={setAuthPassword} onName={setAuthName} onCode={setAuthCode} />)}
         {urlOpen && <UrlImportDialog value={paperUrl} error={urlError} loading={urlLoading} onChange={value => { setPaperUrl(value); setUrlError(""); }} onClose={() => setUrlOpen(false)} onSubmit={openPdfUrl} />}
+        <ExtensionAutoOpenToggle />
       </div>
     );
   }
 
+  if (nativePdfView) {
+    return <div className="app quiet-reading native-pdf-mode">
+      <NativePdfToolbar page={pageInput} total={pdf.numPages} onPage={goToPage} onZoom={delta => setScale(value => Math.max(.6, Math.min(3, +(value + delta).toFixed(1))))} onFullscreen={toggleFullscreen} />
+      <main className="workspace native-pdf-workspace">
+        <section className="viewer">
+          <div className="document-scroll">
+            {Array.from({ length: pdf.numPages }, (_, index) => <PageView
+              key={index + 1}
+              pdf={pdf}
+              pageNumber={index + 1}
+              scale={scale}
+              selections={[]}
+              highlights={[]}
+              onSelect={() => {}}
+              onClose={() => {}}
+              onTask={() => {}}
+              onFollowup={() => {}}
+              onMove={() => {}}
+              onHighlight={() => {}}
+              onDeleteHighlight={() => {}}
+              visualMode={false}
+              visualSelections={[]}
+              mineruRegions={[]}
+              mineruReady={false}
+              onVisualSelect={() => ({ id: "", pageNumber: 0, imageDataUrl: "", pageContext: "", area: { x: 0, y: 0, width: 0, height: 0 } })}
+              onVisualClose={() => {}}
+              onVisualTask={() => {}}
+              onVisualFollowup={() => {}}
+              onNavigate={goToOutline}
+              onVisible={page => { setCurrentPage(page); setPageInput(String(page)); }}
+            />)}
+          </div>
+        </section>
+      </main>
+      <ExtensionAutoOpenToggle />
+    </div>;
+  }
+
   return (
-    <div className="app quiet-reading">
-      {pdfOpening && <div className="ink-opening" role="status" aria-label="正在打开 PDF">
-        <div className="ink-opening-paper" />
-        <div className="ink-opening-wash" />
-        <div className="ink-opening-vignette" />
-        <div className="ink-drop"><i /><b /><em /></div>
-        <div className="ink-opening-wordmark"><img src="/brand/inkwise-mark.svg" alt="" /><span>墨知</span><small>正在展开阅读空间</small></div>
+    <div className={`app quiet-reading${nativePdfView ? " native-pdf-mode" : ""}`}>
+      {pdfOpening && <div className="ink-opening document-loading" role="status" aria-label="正在将 PDF 放入阅读器">
+        <SpaceReaderLoadingScene />
+        <div className="ink-opening-wordmark"><img src="/brand/inkwise-mark.svg" alt="" /><span>墨知</span><small>正在为你展开阅读空间</small></div>
       </div>}
       <header className="topbar">
         <div className="topbar-left">
@@ -1762,7 +2025,7 @@ function App() {
             <IconButton label={visualMode ? "退出图表框选" : "框选图片或表格"} active={visualMode} onClick={() => { setVisualMode(value => !value); setSelections([]); }}>
               <ScanLine size={17} />
             </IconButton>
-            <IconButton label="智能版面分析" onClick={runMineruLayout} active={layoutState.state === "processing" || layoutState.state === "done"}>
+            <IconButton label="智能版面分析" onClick={runMineruLayout} active={layoutState.state === "processing"}>
               <ScanSearch size={17} />
             </IconButton>
           </div>
@@ -1827,16 +2090,9 @@ function App() {
           )}
         </nav>
         <section className="viewer">
-          {layoutNoticeVisible && layoutState.state !== "idle" && <aside className={`layout-notice ${layoutState.state}${layoutNoticeOpen ? " open" : ""}`} aria-live="polite">
-            <button className="layout-notice-summary" type="button" onClick={() => setLayoutNoticeOpen(value => !value)} aria-expanded={layoutNoticeOpen}>
-              <ScanSearch size={16} />
-              <span>智能版面分析</span>
-              <ChevronDown size={15} />
-            </button>
-            <div className="layout-notice-content">
-              <div className="layout-status-line"><span>{layoutState.message}</span><b>{layoutState.progress ?? 0}%</b></div>
-              <div className="layout-progress" aria-hidden="true"><i style={{ width: `${layoutState.progress ?? 0}%` }} /></div>
-            </div>
+          {layoutNoticeVisible && (layoutState.state === "done" || layoutState.state === "error") && <aside className={`layout-notice visible ${layoutState.state}`} aria-live="polite">
+            {layoutState.state === "done" ? <Check size={16} /> : <X size={16} />}
+            <span>{layoutState.message}</span>
           </aside>}
           <div
             className="document-scroll"
@@ -1967,7 +2223,7 @@ function App() {
                     className="generate-summary"
                     onClick={() => requestSummary(kind)}
                     disabled={
-                      !defaultModel || !documentReady || summary.loading === kind
+                      !model || !documentReady || summary.loading === kind
                     }
                   >
                     {summary.loading === kind ? "生成中…" : `生成${title}`}
@@ -2014,14 +2270,13 @@ function App() {
             </button>
             <div className="composer-footer">
               <div className="composer-model">
-                <SlidersHorizontal size={15} />
+                {modelBrand(model) ? <img className="model-brand-logo" src={modelBrand(model)!.src} alt={modelBrand(model)!.alt} /> : <SlidersHorizontal size={15} />}
                 <select
                   aria-label="选择对话模型"
                   value={model}
                   onChange={(event) => setModel(event.target.value)}
                   disabled={!models.length}
                 >
-                  <option value="">未配置</option>
                   {models.map((item) => (
                     <option key={item.id} value={item.id}>
                       {item.name}
@@ -2035,6 +2290,7 @@ function App() {
       </main>
       {authOpen && (session ? <AccountDialog session={session} usage={usage} onClose={() => setAuthOpen(false)} onSignOut={() => { signOut(); setAuthOpen(false); }} /> : <AuthDialog mode={authMode} email={authEmail} password={authPassword} name={authName} code={authCode} error={authError} notice={authNotice} verifying={authVerifying} onClose={() => setAuthOpen(false)} onSubmit={submitAuth} onVerify={verifyEmailCode} onResend={resendEmailCode} onModeChange={(nextMode) => { setAuthMode(nextMode); setAuthVerifying(false); setAuthError(""); setAuthNotice(""); }} onEmail={setAuthEmail} onPassword={setAuthPassword} onName={setAuthName} onCode={setAuthCode} />)}
       {urlOpen && <UrlImportDialog value={paperUrl} error={urlError} loading={urlLoading} onChange={value => { setPaperUrl(value); setUrlError(""); }} onClose={() => setUrlOpen(false)} onSubmit={openPdfUrl} />}
+      <ExtensionAutoOpenToggle />
     </div>
   );
 }

@@ -3,10 +3,25 @@
   "name": "墨知 Inkwise",
   "version": "0.1.0",
   "description": "读懂每一页：本地 PDF 阅读、划词翻译与 AI 阅读助手。",
-  "action": { "default_title": "打开墨知 Inkwise" },
+  "action": {
+    "default_title": "墨知个人中心",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "brand/icon-16.png",
+      "32": "brand/icon-32.png",
+      "48": "brand/icon-48.png",
+      "128": "brand/icon-128.png"
+    }
+  },
   "background": { "service_worker": "background.js" },
-  "permissions": ["storage"],
+  "icons": {
+    "16": "brand/icon-16.png",
+    "32": "brand/icon-32.png",
+    "48": "brand/icon-48.png",
+    "128": "brand/icon-128.png"
+  },
+  "permissions": ["storage", "tabs", "webNavigation"],
   "host_permissions": [
-    "https://*.supabase.co/*"
+    "<all_urls>"
   ]
 }

@@ -1,10 +1,15 @@
 const maxUploadBytes = 15 * 1024 * 1024;
 const mineruOssHost = "mineru.oss-cn-shanghai.aliyuncs.com";
+const uploadCorsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "PUT, OPTIONS",
+  "Access-Control-Allow-Headers": "content-type",
+};
 
 function badRequest(message: string, status = 400) {
   return new Response(JSON.stringify({ error: message }), {
     status,
-    headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+    headers: { "Content-Type": "application/json", "Cache-Control": "no-store", ...uploadCorsHeaders },
   });
 }
 
@@ -14,6 +19,7 @@ export default {
   async fetch(request: Request, env: { ASSETS: StaticAssets }) {
     const requestUrl = new URL(request.url);
     if (requestUrl.pathname !== "/api/mineru-upload") return env.ASSETS.fetch(request);
+    if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: uploadCorsHeaders });
     if (request.method !== "PUT") return badRequest("METHOD_NOT_ALLOWED", 405);
 
     const target = requestUrl.searchParams.get("target");
@@ -51,7 +57,7 @@ export default {
         const detail = (await response.text()).replace(/\s+/g, " ").slice(0, 180);
         return badRequest(`MINERU_UPLOAD_UPSTREAM_${response.status}${detail ? `: ${detail}` : ""}`, 502);
       }
-      return new Response(null, { status: 204, headers: { "Cache-Control": "no-store" } });
+      return new Response(null, { status: 204, headers: { "Cache-Control": "no-store", ...uploadCorsHeaders } });
     } catch (error) {
       const detail = error instanceof Error ? error.message.slice(0, 180) : "unknown network error";
       return badRequest(`MINERU_UPLOAD_NETWORK_FAILED: ${detail}`, 502);

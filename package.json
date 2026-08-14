@@ -2,11 +2,20 @@
   "name": "pdf-ai-reader",
   "private": true,
   "version": "0.1.0",
-  "workspaces": ["apps/*", "packages/*"],
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
     "dev:extension": "npm --workspace apps/extension run dev",
     "build:extension": "npm --workspace apps/extension run build",
     "dev:api": "npm --workspace apps/api run dev",
     "test": "npm run test --workspaces"
+  },
+  "dependencies": {
+    "three": "^0.180.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.185.4"
   }
 }

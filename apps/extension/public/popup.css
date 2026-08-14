@@ -1,0 +1,12 @@
+:root { color: #eeedf4; font-family: Inter, "Microsoft YaHei", system-ui, sans-serif; background: #151622; }
+* { box-sizing: border-box; }
+body { width: 330px; margin: 0; }
+.popup { overflow: hidden; padding: 18px; background: radial-gradient(circle at 88% 0, rgb(146 111 246 / .28), transparent 38%), #151622; }
+header { display: flex; align-items: center; gap: 9px; }
+header img { width: 31px; height: 31px; border-radius: 9px; box-shadow: 0 5px 15px rgb(0 0 0 / .3); }
+header div { display: grid; gap: 2px; } header strong { font-size: 14px; } header span, .popup-intro > span { color: #ac96eb; font-size: 9px; font-weight: 750; letter-spacing: .13em; }
+.popup-intro { margin: 21px 0 17px; } .popup-intro h1 { margin: 5px 0 7px; font-size: 19px; letter-spacing: -.3px; } .popup-intro p { margin: 0; color: #a6a2b5; font-size: 11px; line-height: 1.55; }
+.popup-setting { display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid rgb(255 255 255 / .1); border-radius: 11px; background: rgb(255 255 255 / .055); padding: 12px; cursor: pointer; }
+.popup-setting > span { display: grid; gap: 4px; } .popup-setting b { font-size: 11px; } .popup-setting small { color: #9691a6; font-size: 9px; line-height: 1.35; }
+.popup-setting input { position: absolute; opacity: 0; pointer-events: none; } .popup-setting i { position: relative; width: 42px; height: 23px; flex: none; border-radius: 999px; background: #5d596b; transition: background .18s ease; } .popup-setting em { position: absolute; top: 3px; left: 3px; width: 17px; height: 17px; border-radius: 50%; overflow: hidden; background: #d9d6e2; transition: transform .18s ease; } .popup-setting em img { width: 100%; height: 100%; display: block; } .popup-setting input:checked + i { background: #9a80e8; } .popup-setting input:checked + i em { transform: translateX(19px); }
+footer { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px; } footer button { min-height: 34px; border-radius: 7px; padding: 7px; font-size: 11px; font-weight: 700; cursor: pointer; } .primary { border: 0; background: #ab91ef; color: #231a3e; } .secondary { border: 1px solid rgb(255 255 255 / .14); background: transparent; color: #dfdce8; }

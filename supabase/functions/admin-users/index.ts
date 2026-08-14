@@ -1,5 +1,33 @@
-import { admin, body, json, user } from "../_shared/core.ts";
+import { admin, body, env, json, user } from "../_shared/core.ts";
 import { preflight } from "../_shared/cors.ts";
+
+type RemoteModel = { id: string; name: string; provider: string };
+
+function modelProvider(modelId: string, ownedBy: unknown) {
+  const value = `${String(ownedBy || "")} ${modelId}`.toLowerCase();
+  if (/claude|anthropic/.test(value)) return "Anthropic";
+  if (/gemini|google/.test(value)) return "Google";
+  if (/gpt|openai|\bo[1-9]\b/.test(value)) return "OpenAI";
+  if (/grok|xai/.test(value)) return "xAI";
+  if (/qwen|alibaba/.test(value)) return "Alibaba";
+  if (/deepseek/.test(value)) return "DeepSeek";
+  if (/mistral/.test(value)) return "Mistral AI";
+  return String(ownedBy || "其他").slice(0, 48) || "其他";
+}
+
+async function upstreamModels(): Promise<RemoteModel[]> {
+  const baseUrl = (env("APILIO_BASE_URL") || "https://api.apilio.ai/v1").replace(/\/$/, "");
+  const response = await fetch(`${baseUrl}/models`, { headers: { Authorization: `Bearer ${env("APILIO_API_KEY")}`, Accept: "application/json" } });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !Array.isArray(payload?.data)) throw new Error("UPSTREAM_MODELS_FAILED");
+  const unique = new Map<string, RemoteModel>();
+  for (const item of payload.data) {
+    const id = String(item?.id || "").trim();
+    if (!/^[a-zA-Z0-9._:/-]{1,180}$/.test(id)) continue;
+    unique.set(id, { id, name: String(item?.name || item?.display_name || id).slice(0, 180), provider: modelProvider(id, item?.owned_by) });
+  }
+  return [...unique.values()].sort((a, b) => a.provider.localeCompare(b.provider) || a.name.localeCompare(b.name));
+}
 
 async function requireAdmin(req: Request) {
   const currentUser = await user(req);
@@ -17,6 +45,7 @@ function statusFor(message: string) {
   if (message === "ADMIN_DELETE_FORBIDDEN") return 403;
   if (message === "PLAN_NOT_FOUND") return 404;
   if (message === "PLAN_NAME_EXISTS") return 409;
+  if (message === "UPSTREAM_MODELS_FAILED") return 502;
   return 400;
 }
 
@@ -27,6 +56,15 @@ Deno.serve(async req => {
     const { currentUser, db } = await requireAdmin(req);
     if (req.method === "GET") {
       const url = new URL(req.url);
+      if (url.searchParams.get("models") === "catalog") {
+        const [remote, { data: catalog, error: catalogError }] = await Promise.all([
+          upstreamModels(),
+          db.from("model_catalog").select("model_id,enabled"),
+        ]);
+        if (catalogError) throw catalogError;
+        const catalogById = new Map((catalog || []).map(item => [item.model_id, item]));
+        return json({ models: remote.map(item => ({ ...item, enabled: !!catalogById.get(item.id)?.enabled })) });
+      }
       const detailUserId = url.searchParams.get("userId");
       if (detailUserId) {
         if (!/^[0-9a-f-]{36}$/i.test(detailUserId)) throw new Error("USER_NOT_FOUND");
@@ -57,6 +95,19 @@ Deno.serve(async req => {
     }
     if (req.method === "POST") {
       const input = await body(req);
+      if (input.action === "saveModels") {
+        const models = Array.isArray(input.models) ? input.models : [];
+        if (!models.length || models.length > 500) throw new Error("INVALID_MODELS");
+        const normalized = models.map(item => ({
+          id: String(item?.id || "").trim(),
+          name: String(item?.name || item?.id || "").trim(),
+          provider: String(item?.provider || "其他").trim(),
+        }));
+        if (normalized.some(item => !/^[a-zA-Z0-9._:/-]{1,180}$/.test(item.id) || !item.name || item.name.length > 180 || item.provider.length > 48) || new Set(normalized.map(item => item.id)).size !== normalized.length) throw new Error("INVALID_MODELS");
+        const { error } = await db.rpc("admin_sync_model_catalog", { p_admin_user_id: currentUser.id, p_models: normalized });
+        if (error) throw error;
+        return json({ ok: true, enabled: normalized.length });
+      }
       if (input.action === "savePlan") {
         const planId = input.planId ? String(input.planId) : null;
         const name = String(input.name || "");
