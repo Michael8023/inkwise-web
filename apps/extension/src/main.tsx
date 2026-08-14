@@ -82,6 +82,13 @@ type VisualRegion = {
   area: { x: number; y: number; width: number; height: number };
   pageNumber?: number;
 };
+type PdfLink = {
+  id: string;
+  area: { x: number; y: number; width: number; height: number };
+  url?: string;
+  destination?: unknown;
+  label: string;
+};
 type LayoutState = { state: "idle" | "preparing" | "uploading" | "processing" | "downloading" | "done" | "error"; message?: string; progress?: number };
 type Tab = "summary" | "chat" | "history";
 type OutlineItem = { title: string; dest?: unknown; pageNumber?: number; items?: OutlineItem[] };
@@ -685,6 +692,7 @@ function PageView({
   onVisualTask,
   onVisualFollowup,
   onVisible,
+  onNavigate,
 }: {
   pdf: any;
   pageNumber: number;
@@ -707,6 +715,7 @@ function PageView({
   onVisualTask: (selection: VisualSelection, kind: "explain" | "table") => void;
   onVisualFollowup: (selection: VisualSelection, question: string) => void;
   onVisible: (page: number) => void;
+  onNavigate: (destination: unknown) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const layerRef = useRef<HTMLDivElement>(null);
@@ -720,6 +729,7 @@ function PageView({
   const [visualRegions, setVisualRegions] = useState<VisualRegion[]>([]);
   const [activeVisualRegion, setActiveVisualRegion] = useState<string | null>(null);
   const [copiedVisualRegion, setCopiedVisualRegion] = useState<string | null>(null);
+  const [pdfLinks, setPdfLinks] = useState<PdfLink[]>([]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -759,6 +769,59 @@ function PageView({
         .join(" ");
       setPageText(extractedText);
       detectPageVisualRegions(page, viewport, textContent).then(regions => { if (!cancelled) setVisualRegions(regions); }).catch(() => { if (!cancelled) setVisualRegions([]); });
+      page.getAnnotations({ intent: "display" }).then((annotations: any[]) => {
+        if (cancelled) return;
+        const links = annotations.flatMap((annotation: any): PdfLink[] => {
+          if (annotation.subtype !== "Link" || !Array.isArray(annotation.rect)) return [];
+          const points = viewport.convertToViewportRectangle(annotation.rect);
+          const left = Math.max(0, Math.min(points[0], points[2]));
+          const top = Math.max(0, Math.min(points[1], points[3]));
+          const right = Math.min(viewport.width, Math.max(points[0], points[2]));
+          const bottom = Math.min(viewport.height, Math.max(points[1], points[3]));
+          if (right <= left || bottom <= top) return [];
+          const rawUrl = typeof annotation.url === "string" ? annotation.url : "";
+          let url: string | undefined;
+          try {
+            const parsed = new URL(rawUrl);
+            if (["http:", "https:", "mailto:"].includes(parsed.protocol)) url = parsed.toString();
+          } catch { /* Internal destinations do not have a URL. */ }
+          if (!url && !annotation.dest) return [];
+          return [{
+            id: annotation.id || crypto.randomUUID(),
+            area: { x: left / viewport.width, y: top / viewport.height, width: (right - left) / viewport.width, height: (bottom - top) / viewport.height },
+            url,
+            destination: annotation.dest,
+            label: annotation.title || annotation.contents || (url ? "打开外部链接" : "跳转到文档位置"),
+          }];
+        });
+        // Some publisher PDFs draw URLs as ordinary text instead of Link
+        // annotations. Turn those visible URL runs into the same click targets.
+        const urlPattern = /(?:https?:\/\/|www\.)[^\s<>()\[\]{}]+/gi;
+        textContent.items.forEach((item: any, itemIndex: number) => {
+          const text = String(item.str || "");
+          for (const match of text.matchAll(urlPattern)) {
+            const rawUrl = match[0].replace(/[.,;:]+$/, "");
+            let url: string;
+            try {
+              url = new URL(rawUrl.startsWith("www.") ? `https://${rawUrl}` : rawUrl).toString();
+            } catch { continue; }
+            const matrix = pdfjsLib.Util.transform(viewport.transform, item.transform);
+            const itemWidth = Math.max(1, Number(item.width || 0) * viewport.scale);
+            const itemHeight = Math.max(5, Math.abs(matrix[3]) || 10);
+            const start = (match.index || 0) / Math.max(1, text.length);
+            const width = rawUrl.length / Math.max(1, text.length);
+            const area = {
+              x: Math.max(0, matrix[4] / viewport.width + itemWidth * start / viewport.width),
+              y: Math.max(0, (matrix[5] - itemHeight) / viewport.height),
+              width: Math.min(1, itemWidth * width / viewport.width),
+              height: Math.min(1, itemHeight / viewport.height),
+            };
+            if (area.width <= 0 || area.height <= 0 || links.some(link => overlapRatio(link.area, area) > .6)) continue;
+            links.push({ id: `text-url-${itemIndex}-${match.index}`, area, url, label: `打开链接：${rawUrl}` });
+          }
+        });
+        setPdfLinks(links);
+      }).catch(() => { if (!cancelled) setPdfLinks([]); });
       if (cancelled) return;
       await page.render({
         canvasContext: canvas.getContext("2d")!,
@@ -923,6 +986,7 @@ function PageView({
         <canvas ref={canvasRef} />
         <div className="text-layer" ref={layerRef} />
         {visualDraft && <div className="visual-selection-draft" style={{ left: `${visualDraft.x * 100}%`, top: `${visualDraft.y * 100}%`, width: `${visualDraft.width * 100}%`, height: `${visualDraft.height * 100}%` }} />}
+        {mineruReady && <div className="pdf-link-regions" aria-label="PDF 链接">{pdfLinks.map(link => link.url ? <a key={link.id} href={link.url} target="_blank" rel="noopener noreferrer" className="pdf-link-region" style={{ left: `${link.area.x * 100}%`, top: `${link.area.y * 100}%`, width: `${link.area.width * 100}%`, height: `${link.area.height * 100}%` }} title={link.label} aria-label={link.label} onClick={event => event.stopPropagation()} /> : <button key={link.id} type="button" className="pdf-link-region" style={{ left: `${link.area.x * 100}%`, top: `${link.area.y * 100}%`, width: `${link.area.width * 100}%`, height: `${link.area.height * 100}%` }} title={link.label} aria-label={link.label} onClick={event => { event.stopPropagation(); onNavigate(link.destination); }} />)}</div>}
         <div className="auto-visual-regions" aria-label="自动识别的文档结构区域">{(mineruReady ? mineruRegions : visualRegions).map(region => {
           const label = region.kind === "table" ? "表格" : region.kind === "formula" ? "公式" : region.kind === "caption" ? (region.captionFor === "table" ? "表题" : region.captionFor === "image" ? "图题" : "标题") : "图片";
           const actionable = region.kind !== "caption";
@@ -1812,6 +1876,7 @@ function App() {
                   onVisualClose={(id) => setVisualSelections(items => items.filter(item => item.id !== id))}
                   onVisualTask={runVisualTask}
                   onVisualFollowup={followupVisualExplanation}
+                  onNavigate={goToOutline}
                   onVisible={(page) => { setCurrentPage(page); setPageInput(String(page)); }}
                 />
               ))}

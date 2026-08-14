@@ -724,6 +724,10 @@ button {
 .visual-selection-draft, .visual-selection-area { position: absolute; z-index: 7; border: 1.5px solid var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); box-shadow: 0 0 0 1px rgb(255 255 255 / .75), 0 5px 18px rgb(33 22 73 / .14); pointer-events: none; }
 .visual-selection-draft { border-style: dashed; }
 .auto-visual-regions { position: absolute; z-index: 6; inset: 0; pointer-events: none; }
+.pdf-link-regions { position: absolute; z-index: 5; inset: 0; pointer-events: none; }
+.pdf-link-region { position: absolute; display: block; border: 1px solid transparent; border-radius: 2px; background: transparent; padding: 0; pointer-events: auto; cursor: pointer; }
+.pdf-link-region:hover, .pdf-link-region:focus-visible { border-color: rgb(118 87 232 / .76); background: rgb(118 87 232 / .12); box-shadow: 0 0 0 2px rgb(255 255 255 / .72); outline: 0; }
+.page-sheet.visual-select-mode .pdf-link-regions { display: none; }
 .auto-visual-region { position: absolute; border: 1.5px dashed transparent; background: transparent; pointer-events: auto; transition: border-color .13s ease, background .13s ease, box-shadow .13s ease; }
 .auto-visual-region.active { border-color: color-mix(in srgb, var(--accent) 86%, #fff); background: color-mix(in srgb, var(--accent) 5%, transparent); box-shadow: 0 0 0 2px rgb(255 255 255 / .7), 0 5px 18px rgb(28 23 54 / .16); }
 .auto-visual-actions { position: absolute; top: 5px; right: 5px; display: flex; align-items: center; gap: 4px; opacity: 0; transform: translateY(-3px); border: 1px solid rgb(255 255 255 / .7); border-radius: 6px; background: rgb(27 31 38 / .9); color: #fff; padding: 3px; box-shadow: 0 5px 16px rgb(0 0 0 / .22); backdrop-filter: blur(8px); transition: opacity .13s ease, transform .13s ease; pointer-events: none; }
