@@ -348,6 +348,18 @@ function AccountDialog({ session, usage, onClose, onSignOut }: { session: AuthSe
   </section></div>;
 }
 
+function UrlImportDialog({ value, error, loading, onChange, onClose, onSubmit }: { value: string; error: string; loading: boolean; onChange: (value: string) => void; onClose: () => void; onSubmit: () => void }) {
+  return <div className="auth-backdrop url-import-backdrop"><form className="auth-dialog url-import-dialog" onSubmit={event => { event.preventDefault(); onSubmit(); }}>
+    <button type="button" className="popover-close" onClick={onClose} aria-label="关闭导入窗口"><X size={16} /></button>
+    <div className="url-import-icon"><Link size={20} /></div>
+    <div className="url-import-heading"><span>INKWISE / IMPORT</span><h2>导入论文链接</h2><p>粘贴公开 PDF 的直链，我们会在当前阅读器中打开。</p></div>
+    <label className="url-import-field">PDF 链接<input type="url" required autoFocus placeholder="https://arxiv.org/pdf/..." value={value} onChange={event => onChange(event.target.value)} /></label>
+    {error && <p className="url-import-error">{error}</p>}
+    <button className="url-import-submit" type="submit" disabled={loading}>{loading ? "正在导入…" : "在当前页面打开"}<ChevronRight size={17} /></button>
+    <p className="url-import-help">支持公开链接；受跨域限制的站点需登录后导入。</p>
+  </form></div>;
+}
+
 function IconButton({
   label,
   children,
@@ -1386,15 +1398,7 @@ function App() {
     } finally { setUrlLoading(false); }
   }
   async function openPdfUrl() {
-    setUrlError("");
-    try {
-      const parsed = validatePdfUrl(paperUrl.trim());
-      const target = window.open(`${window.location.origin}/?openPdfUrl=${encodeURIComponent(parsed.toString())}`, "_blank");
-      if (!target) throw new Error("浏览器阻止了新标签页，请允许本站打开新窗口。");
-      setUrlOpen(false);
-    } catch (error) {
-      setUrlError(error instanceof Error ? error.message : "链接格式不正确。");
-    }
+    await loadPdfUrl(paperUrl);
   }
   async function requestSummary(kind: "short" | "full") {
     if (!documentReady || !defaultModel || !documentId) return;
@@ -1633,7 +1637,7 @@ function App() {
         />
         <input ref={fileInput} className="welcome-file-input" type="file" accept="application/pdf" onChange={(event) => event.target.files?.[0] && openFile(event.target.files[0])} />
         {authOpen && (session ? <AccountDialog session={session} usage={usage} onClose={() => setAuthOpen(false)} onSignOut={() => { signOut(); setAuthOpen(false); }} /> : <AuthDialog mode={authMode} email={authEmail} password={authPassword} name={authName} code={authCode} error={authError} notice={authNotice} verifying={authVerifying} onClose={() => setAuthOpen(false)} onSubmit={submitAuth} onVerify={verifyEmailCode} onResend={resendEmailCode} onModeChange={(nextMode) => { setAuthMode(nextMode); setAuthVerifying(false); setAuthError(""); setAuthNotice(""); }} onEmail={setAuthEmail} onPassword={setAuthPassword} onName={setAuthName} onCode={setAuthCode} />)}
-        {urlOpen && <div className="auth-backdrop"><form className="auth-dialog" onSubmit={(event) => { event.preventDefault(); openPdfUrl(); }}><button type="button" className="popover-close" onClick={() => setUrlOpen(false)}><X size={16} /></button><h2>打开在线 PDF</h2><p className="auth-notice">支持公开的 PDF 直链。跨域受限的链接需登录后导入，文件不会保存到服务器。</p><input type="url" required placeholder="粘贴 PDF 直链，例如 https://arxiv.org/pdf/..." value={paperUrl} onChange={(event) => { setPaperUrl(event.target.value); setUrlError(""); }} />{urlError && <p>{urlError}</p>}<button type="submit" disabled={urlLoading}>{urlLoading ? "正在读取…" : "打开 PDF"}</button></form></div>}
+        {urlOpen && <UrlImportDialog value={paperUrl} error={urlError} loading={urlLoading} onChange={value => { setPaperUrl(value); setUrlError(""); }} onClose={() => setUrlOpen(false)} onSubmit={openPdfUrl} />}
       </div>
     );
   }
@@ -1965,7 +1969,7 @@ function App() {
         </aside>
       </main>
       {authOpen && (session ? <AccountDialog session={session} usage={usage} onClose={() => setAuthOpen(false)} onSignOut={() => { signOut(); setAuthOpen(false); }} /> : <AuthDialog mode={authMode} email={authEmail} password={authPassword} name={authName} code={authCode} error={authError} notice={authNotice} verifying={authVerifying} onClose={() => setAuthOpen(false)} onSubmit={submitAuth} onVerify={verifyEmailCode} onResend={resendEmailCode} onModeChange={(nextMode) => { setAuthMode(nextMode); setAuthVerifying(false); setAuthError(""); setAuthNotice(""); }} onEmail={setAuthEmail} onPassword={setAuthPassword} onName={setAuthName} onCode={setAuthCode} />)}
-      {urlOpen && <div className="auth-backdrop"><form className="auth-dialog" onSubmit={(event) => { event.preventDefault(); openPdfUrl(); }}><button type="button" className="popover-close" onClick={() => setUrlOpen(false)}><X size={16} /></button><h2>打开在线 PDF</h2><p className="auth-notice">支持公开的 PDF 直链。跨域受限的链接需登录后导入，文件不会保存到服务器。</p><input type="url" required placeholder="粘贴 PDF 直链，例如 https://arxiv.org/pdf/..." value={paperUrl} onChange={(event) => { setPaperUrl(event.target.value); setUrlError(""); }} />{urlError && <p>{urlError}</p>}<button type="submit" disabled={urlLoading}>{urlLoading ? "正在读取…" : "打开 PDF"}</button></form></div>}
+      {urlOpen && <UrlImportDialog value={paperUrl} error={urlError} loading={urlLoading} onChange={value => { setPaperUrl(value); setUrlError(""); }} onClose={() => setUrlOpen(false)} onSubmit={openPdfUrl} />}
     </div>
   );
 }
