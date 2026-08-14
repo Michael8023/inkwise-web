@@ -379,7 +379,7 @@ function UrlImportDialog({ value, error, loading, onChange, onClose, onSubmit }:
     <label className="url-import-field">PDF 或 DOI<input type="text" required autoFocus placeholder="https://doi.org/10.xxxx/... 或 10.xxxx/..." value={value} onChange={event => onChange(event.target.value)} /></label>
     {error && <p className="url-import-error">{error}</p>}
     <button className="url-import-submit" type="submit" disabled={loading}>{loading ? "正在导入…" : "在当前页面打开"}<ChevronRight size={17} /></button>
-    <p className="url-import-help">DOI 解析会先尝试出版商官方渠道，如不可访问则自动从 Sci-Hub 等学术资源库获取。</p>
+    <p className="url-import-help">DOI 解析会先尝试出版商官方渠道，如不可访问则自动从 Unpaywall、Europe PMC、Sci-Hub 等学术资源库获取。</p>
   </form></div>;
 }
 
