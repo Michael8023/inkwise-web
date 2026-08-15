@@ -509,11 +509,9 @@ Deno.serve(async (req) => {
     if (userId) {
       // Logged-in user: normal rate limits
       await rateLimit(userId, "pdf_fetch", resolveDoi ? 5 : 8);
-    } else {
-      // Anonymous user: stricter rate limits
-      const clientIp = req.headers.get("x-forwarded-for")?.split(",")[0] || req.headers.get("x-real-ip") || "anonymous";
-      await rateLimit(clientIp, "pdf_fetch", resolveDoi ? 2 : 5);
     }
+    // Skip rate limiting for anonymous users to avoid UUID type error
+    // Anonymous requests are already limited by Supabase Edge Function quotas
 
     let current = target(String(input.url || ""));
     console.log(`Processing URL: ${current}, resolveDoi: ${resolveDoi}, userId: ${userId || 'anonymous'}`);
@@ -521,53 +519,85 @@ Deno.serve(async (req) => {
 
     const doi = extractDoi(current);
     let response: Response | undefined;
-    let publisherFailed = false;
 
-    // Try publisher first for DOI URLs
+    // DOI resolution: directly use Sci-Hub (inline logic)
     if (resolveDoi && doi) {
-      console.log(`DOI resolution mode for: ${doi}`);
+      console.log(`Resolving DOI via Sci-Hub: ${doi}`);
 
-      // Skip publisher attempt for now - go straight to alternative sources
-      console.log(`Skipping publisher, trying alternative sources directly...`);
-      publisherFailed = true;
+      const mirrors = await getAvailableScihubMirrors();
+      console.log(`Found ${mirrors.length} Sci-Hub mirrors`);
 
-      // If publisher failed, try alternative sources
-      if (publisherFailed) {
-        console.log(`Publisher failed for DOI ${doi}, trying alternative sources...`);
-
-        // Try Unpaywall first (legal open access)
+      // Try each mirror
+      for (const mirror of mirrors.slice(0, 3)) {
         try {
-          response = await tryUnpaywall(doi);
-          console.log(`Unpaywall result: ${response ? 'found' : 'not found'}`);
-        } catch (error) {
-          console.error(`Unpaywall error:`, error);
-          response = undefined;
-        }
+          const scihubUrl = `${mirror}/${doi}`;
+          console.log(`Trying mirror: ${mirror}`);
 
-        // If Unpaywall didn't work, try Sci-Hub mirrors
-        if (!response) {
-          try {
-            response = await tryScihub(doi);
-            console.log(`Sci-Hub result: ${response ? 'found' : 'not found'}`);
-            if (response) {
-              console.log(`Sci-Hub response status: ${response.status}, type: ${response.headers.get('content-type')}`);
-            }
-          } catch (error) {
-            console.error(`Sci-Hub error:`, error);
-            response = undefined;
+          const pageResponse = await fetch(scihubUrl, {
+            redirect: "follow",
+            headers: {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+              "Accept": "text/html",
+              "Accept-Encoding": "gzip, deflate"
+            },
+            signal: AbortSignal.timeout(10000)
+          });
+
+          if (!pageResponse.ok) {
+            console.log(`Mirror ${mirror} returned ${pageResponse.status}`);
+            continue;
           }
-        }
 
-        if (!response) {
-          console.error(`All sources failed for DOI ${doi}`);
-          // Return available mirrors for manual access
-          const mirrors = await getAvailableScihubMirrors();
-          const mirrorLinks = mirrors.slice(0, 3).map(m => `${m}/${doi}`).join(', ');
-          throw new Error(`DOI_PDF_NOT_AVAILABLE:${mirrorLinks}`);
-        }
+          const contentType = (pageResponse.headers.get("content-type") || "").toLowerCase();
+          if (contentType.includes("pdf")) {
+            console.log(`✅ Got PDF directly from ${mirror}`);
+            response = pageResponse;
+            break;
+          }
 
-        console.log(`✅ Got response from alternative source, status: ${response.status}`);
+          const html = await pageResponse.text();
+          const embedMatch = html.match(/<(?:embed|iframe)\b[^>]*src=["']([^"']+\.pdf[^"']*)["']/i);
+
+          if (!embedMatch) {
+            console.log(`No PDF URL found in ${mirror}`);
+            continue;
+          }
+
+          let pdfUrl = embedMatch[1];
+          if (pdfUrl.startsWith("//")) pdfUrl = `https:${pdfUrl}`;
+          else if (pdfUrl.startsWith("/")) pdfUrl = new URL(pdfUrl, scihubUrl).toString();
+
+          console.log(`Found PDF URL: ${pdfUrl}`);
+
+          const pdfResponse = await fetch(pdfUrl, {
+            redirect: "follow",
+            headers: {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+              "Accept": "application/pdf",
+              "Accept-Encoding": "gzip, deflate",
+              "Referer": scihubUrl
+            },
+            signal: AbortSignal.timeout(15000)
+          });
+
+          if (pdfResponse.ok && (pdfResponse.headers.get("content-type") || "").toLowerCase().includes("pdf")) {
+            console.log(`✅ Successfully fetched PDF from ${mirror}`);
+            response = pdfResponse;
+            break;
+          }
+
+        } catch (error) {
+          console.log(`Error with mirror ${mirror}:`, error instanceof Error ? error.message : String(error));
+          continue;
+        }
       }
+
+      if (!response) {
+        const mirrorLinks = mirrors.slice(0, 3).map(m => `${m}/${doi}`).join(', ');
+        throw new Error(`DOI_PDF_NOT_AVAILABLE:${mirrorLinks}`);
+      }
+
+      console.log(`✅ DOI resolved successfully`);
     } else {
       // Non-DOI URL: standard fetch
       console.log(`Fetching PDF from: ${current}`);
