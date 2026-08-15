@@ -73,9 +73,8 @@ async function getAvailableScihubMirrors(): Promise<string[]> {
     const html = await response.text();
 
     // Extract Sci-Hub mirror links from the HTML
-    // The page typically lists mirrors like: https://sci-hub.se, https://sci-hub.st, etc.
     const mirrors: string[] = [];
-    const linkPattern = /https?:\/\/sci-?hub\.[a-z]{2,}/gi;
+    const linkPattern = /https?:\/\/(?:www\.)?sci-?hub\.[a-z]{2,}/gi;
     const matches = html.match(linkPattern);
 
     if (matches) {
@@ -93,22 +92,37 @@ async function getAvailableScihubMirrors(): Promise<string[]> {
       }
     }
 
-    return mirrors;
-  } catch {
-    // Fallback to known stable mirrors if fetching fails
-    return [
-      "https://sci-hub.se",
-      "https://sci-hub.st",
-      "https://sci-hub.ru"
-    ];
+    console.log(`Found ${mirrors.length} Sci-Hub mirrors from sci-hub.shop`);
+    return mirrors.length > 0 ? mirrors : getFallbackMirrors();
+  } catch (error) {
+    console.error("Failed to fetch Sci-Hub mirrors:", error);
+    return getFallbackMirrors();
   }
+}
+
+function getFallbackMirrors(): string[] {
+  // Expanded list of known Sci-Hub mirrors as of 2026
+  return [
+    "https://sci-hub.se",
+    "https://sci-hub.st",
+    "https://sci-hub.ru",
+    "https://sci-hub.ee",
+    "https://sci-hub.al",
+    "https://sci-hub.mk",
+    "https://sci-hub.vg"
+  ];
 }
 
 async function tryScihub(doi: string): Promise<Response | null> {
   try {
     const mirrors = await getAvailableScihubMirrors();
 
-    if (!mirrors.length) return null;
+    if (!mirrors.length) {
+      console.log("No Sci-Hub mirrors available");
+      return null;
+    }
+
+    console.log(`Trying ${mirrors.length} Sci-Hub mirrors for DOI ${doi}`);
 
     // Try each mirror
     for (const mirror of mirrors) {
@@ -117,16 +131,30 @@ async function tryScihub(doi: string): Promise<Response | null> {
         const scihubUrlObj = target(scihubUrl);
         await assertPublicDns(scihubUrlObj);
 
+        console.log(`Attempting Sci-Hub mirror: ${mirror}`);
+
         const pageResponse = await fetch(scihubUrlObj, {
           redirect: "follow",
           headers: {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept-Encoding": "gzip, deflate, br",
+            "DNT": "1",
+            "Connection": "keep-alive",
+            "Upgrade-Insecure-Requests": "1",
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "none",
+            "Cache-Control": "max-age=0"
           },
-          signal: AbortSignal.timeout(12000)
+          signal: AbortSignal.timeout(15000)
         });
 
-        if (!pageResponse.ok) continue;
+        if (!pageResponse.ok) {
+          console.log(`Sci-Hub mirror ${mirror} returned status ${pageResponse.status}`);
+          continue;
+        }
 
         const contentType = (pageResponse.headers.get("content-type") || "").toLowerCase();
 
@@ -134,11 +162,20 @@ async function tryScihub(doi: string): Promise<Response | null> {
         if (contentType.includes("pdf")) {
           const size = Number(pageResponse.headers.get("content-length") || 0);
           if (size > 0 && size <= MAX_BYTES) {
+            console.log(`Got PDF directly from ${mirror}, size: ${size}`);
             return pageResponse;
           }
         }
 
         // Parse the HTML to find the PDF embed or download link
+        const html = await pageResponse.text();
+
+        // Check for Cloudflare challenge or CAPTCHA
+        if (html.includes("cf-browser-verification") || html.includes("challenge-platform") ||
+            html.includes("проверка на робота") || html.includes("Just a moment")) {
+          console.log(`Sci-Hub mirror ${mirror} has Cloudflare protection`);
+          continue;
+        }
         if (contentType.includes("html")) {
           const html = await pageResponse.text();
 
@@ -326,6 +363,18 @@ Deno.serve(async (req) => {
   try {
     if (req.method !== "POST") throw new Error("METHOD_NOT_ALLOWED");
     const input = await body(req);
+
+    // Debug endpoint
+    if (input.debug === true) {
+      return new Response(JSON.stringify({
+        status: "ok",
+        message: "Edge Function is working",
+        timestamp: new Date().toISOString()
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" }
+      });
+    }
+
     const resolveDoi = input.resolveDoi === true;
 
     // Try to get user, but allow anonymous access with stricter rate limits
@@ -348,6 +397,7 @@ Deno.serve(async (req) => {
     }
 
     let current = target(String(input.url || ""));
+    console.log(`Processing URL: ${current}, resolveDoi: ${resolveDoi}, userId: ${userId || 'anonymous'}`);
     if (resolveDoi && !isDoiUrl(current)) throw new Error("DOI_NOT_ALLOWED");
 
     const doi = extractDoi(current);
@@ -393,15 +443,22 @@ Deno.serve(async (req) => {
 
       // If publisher failed, try alternative sources
       if (publisherFailed) {
+        console.log(`Publisher failed for DOI ${doi}, trying alternative sources...`);
+
         // Try Unpaywall first (legal open access)
         response = await tryUnpaywall(doi);
+        console.log(`Unpaywall result: ${response ? 'found' : 'not found'}`);
 
         // If Unpaywall didn't work, try Sci-Hub mirrors
         if (!response) {
           response = await tryScihub(doi);
+          console.log(`Sci-Hub result: ${response ? 'found' : 'not found'}`);
         }
 
-        if (!response) throw new Error("DOI_PDF_NOT_FOUND");
+        if (!response) {
+          console.error(`All sources failed for DOI ${doi}`);
+          throw new Error("DOI_PDF_NOT_AVAILABLE");
+        }
       }
     } else {
       // Non-DOI URL: standard fetch

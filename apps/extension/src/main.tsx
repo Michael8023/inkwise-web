@@ -332,6 +332,7 @@ const apiErrors: Record<string, string> = {
   MINERU_FILE_TOO_LARGE: "当前 PDF 超过 15MB，暂时无法进行智能版面分析。",
   MINERU_UPLOAD_FAILED: "文档上传失败，请稍后重试。",
   DOI_PDF_NOT_FOUND: "该 DOI 对应的 PDF 暂时无法获取。我们已尝试出版商官方渠道、Unpaywall 开放获取资源以及 Sci-Hub 镜像，但均未成功。请尝试通过机构访问或手动下载后导入。",
+  DOI_PDF_NOT_AVAILABLE: "该 DOI 对应的 PDF 暂时无法获取。出版商设置了付费墙，且未找到开放获取版本。建议：1) 通过所在机构的图书馆访问 2) 联系作者索取预印本 3) 手动下载后导入。",
   PDF_UPSTREAM_401: "该论文需要订阅权限，无法自动获取。请通过机构访问或手动下载后导入。",
   PDF_UPSTREAM_403: "该论文访问受限，无法自动获取。请通过机构访问或手动下载后导入。",
   PDF_IMPORT_TOO_LARGE: "该 PDF 超过 128 MB，暂时无法通过链接导入。",
