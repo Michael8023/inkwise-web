@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "package:edge": "npm run build && rm -f ../../dist/inkwise-edge-extension.zip && mkdir -p ../../dist && cd dist && bsdtar -a -c -f ../../../dist/inkwise-edge-extension.zip .",
+    "package:edge": "npm run build && rm -f ../../dist/shidea-edge-extension.zip && mkdir -p ../../dist && cd dist && bsdtar -a -c -f ../../../dist/shidea-edge-extension.zip .",
     "deploy": "wrangler deploy",
     "test": "vitest run"
   },

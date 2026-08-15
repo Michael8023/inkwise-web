@@ -350,7 +350,7 @@ function AuthDialog({
 }) {
   return <div className="auth-backdrop"><form className="auth-dialog" onSubmit={(event) => { event.preventDefault(); verifying ? onVerify() : onSubmit(); }}>
     <button type="button" className="popover-close" onClick={onClose}><X size={16} /></button>
-    <div className="auth-brand"><img src="/brand/inkwise-mark.svg" alt="" /><span>墨知 <em>Inkwise</em></span></div>
+    <div className="auth-brand"><img src="/brand/shidea-mark.png" alt="" /><span>识谛 <em>shidea</em></span></div>
     <div className="auth-heading"><h2>{verifying ? "验证你的邮箱" : mode === "login" ? "欢迎回来" : "创建你的阅读空间"}</h2></div>
     {verifying ? <div className="auth-fields verification-fields"><p>验证码已发送至 <strong>{email}</strong></p><label>六位验证码<input className="verification-code" inputMode="numeric" autoComplete="one-time-code" autoFocus placeholder="000000" required minLength={6} maxLength={6} value={code} onChange={(event) => onCode(event.target.value.replace(/\D/g, "").slice(0, 6))} /></label><button className="auth-inline-action" type="button" onClick={onResend}>重新发送验证码</button></div> : <><div className="auth-tabs" role="tablist"><button className={mode === "login" ? "active" : ""} type="button" onClick={() => onModeChange("login")}>登录</button><button className={mode === "register" ? "active" : ""} type="button" onClick={() => onModeChange("register")}>注册</button></div><div className="auth-fields">
       {mode === "register" && <label>用户名<input placeholder="至少 3 个字符" required minLength={3} value={name} onChange={(event) => onName(event.target.value)} /></label>}
@@ -358,17 +358,17 @@ function AuthDialog({
       <label>密码<input type="password" placeholder="至少 8 位" required minLength={8} autoComplete={mode === "login" ? "current-password" : "new-password"} value={password} onChange={(event) => onPassword(event.target.value)} /></label>
     </div></>}
     {error && <p className="auth-feedback error">{error}</p>}{notice && <p className="auth-feedback auth-notice">{notice}</p>}
-    <button className="auth-submit" type="submit">{verifying ? "完成验证" : mode === "login" ? "登录墨知" : "发送验证码"}<ChevronRight size={17} /></button>
+    <button className="auth-submit" type="submit">{verifying ? "完成验证" : mode === "login" ? "登录识谛" : "发送验证码"}<ChevronRight size={17} /></button>
   </form></div>;
 }
 
 function AccountDialog({ session, usage, onClose, onSignOut }: { session: AuthSession; usage: Usage | null; onClose: () => void; onSignOut: () => void }) {
-  const displayName = String(session.user.user_metadata?.display_name || session.user.user_metadata?.username || "墨知用户");
+  const displayName = String(session.user.user_metadata?.display_name || session.user.user_metadata?.username || "识谛用户");
   const initial = displayName.trim().slice(0, 1).toUpperCase() || "I";
   const creditAmount = usage?.creditsRemaining ?? 0;
   return <div className="auth-backdrop"><section className="auth-dialog account-dialog">
     <button type="button" className="popover-close" onClick={onClose}><X size={16} /></button>
-    <div className="auth-brand"><img src="/brand/inkwise-mark.svg" alt="" /><span>墨知 <em>Inkwise</em></span></div>
+    <div className="auth-brand"><img src="/brand/shidea-mark.png" alt="" /><span>识谛 <em>shidea</em></span></div>
     <div className="account-hero"><div className="account-avatar">{initial}</div><div><p>账户中心</p><h2>{displayName}</h2><span>{session.user.email}</span></div></div>
     <section className="account-credits"><div><span>可用 AI 额度</span><strong>{creditAmount}<small> 分</small></strong></div><div className="credit-orbit"><Sparkles size={19} /></div></section>
     <div className="quota-summary"><span>当前套餐<strong>{usage?.plan ? usage.plan.toUpperCase() : "FREE"}</strong></span><span>结算日期<strong>{usage?.periodEnd ? new Date(usage.periodEnd).toLocaleDateString("zh-CN", { month: "short", day: "numeric" }) : "每月"}</strong></span></div>
@@ -380,7 +380,7 @@ function UrlImportDialog({ value, error, loading, onChange, onClose, onSubmit }:
   return <div className="auth-backdrop url-import-backdrop"><form className="auth-dialog url-import-dialog" onSubmit={event => { event.preventDefault(); onSubmit(); }}>
     <button type="button" className="popover-close" onClick={onClose} aria-label="关闭导入窗口"><X size={16} /></button>
     <div className="url-import-icon"><Link size={20} /></div>
-    <div className="url-import-heading"><span>INKWISE / IMPORT</span><h2>导入论文链接</h2><p>支持公开 PDF 链接、doi.org 链接或纯 DOI；我们会尝试导入出版商或开放资源提供的 PDF。</p></div>
+    <div className="url-import-heading"><span>SHIDEA / IMPORT</span><h2>导入论文链接</h2><p>支持公开 PDF 链接、doi.org 链接或纯 DOI；我们会尝试导入出版商或开放资源提供的 PDF。</p></div>
     <label className="url-import-field">PDF 或 DOI<input type="text" required autoFocus placeholder="https://doi.org/10.xxxx/... 或 10.xxxx/..." value={value} onChange={event => onChange(event.target.value)} /></label>
     {error && <p className="url-import-error">{error}</p>}
     <button className="url-import-submit" type="submit" disabled={loading}>{loading ? "正在导入…" : "在当前页面打开"}<ChevronRight size={17} /></button>
@@ -404,11 +404,11 @@ function ExtensionAutoOpenToggle() {
     return () => extension.storage.onChanged.removeListener(listener);
   }, []);
   if (!available) return null;
-  return <button className={`extension-auto-open-toggle${enabled ? " enabled" : ""}`} type="button" role="switch" aria-checked={enabled} title={enabled ? "关闭自动使用墨知打开 PDF" : "启用自动使用墨知打开 PDF"} onClick={() => {
+  return <button className={`extension-auto-open-toggle${enabled ? " enabled" : ""}`} type="button" role="switch" aria-checked={enabled} title={enabled ? "关闭自动使用识谛打开 PDF" : "启用自动使用识谛打开 PDF"} onClick={() => {
     const next = !enabled;
     setEnabled(next);
     (globalThis as any).chrome.storage.sync.set({ autoOpenPdf: next });
-  }}><span className="extension-auto-open-track" aria-hidden="true"><span className="extension-auto-open-thumb"><img src="/brand/inkwise-mark.svg" alt="" /></span></span></button>;
+  }}><span className="extension-auto-open-track" aria-hidden="true"><span className="extension-auto-open-thumb"><img src="/brand/shidea-mark.png" alt="" /></span></span></button>;
 }
 
 function NativePdfToolbar({ page, total, onPage, onZoom, onFullscreen }: { page: string; total: number; onPage: (page: number) => void; onZoom: (delta: number) => void; onFullscreen: () => void }) {
@@ -460,8 +460,8 @@ function WelcomeScreen({
     <main className="welcome-shell">
       <header className="welcome-nav">
         <div className="welcome-wordmark">
-          <img src="/brand/inkwise-mark.svg" alt="墨知 Inkwise" />
-          <span>墨知</span><em>Inkwise</em>
+          <img src="/brand/shidea-mark.png" alt="识谛 shidea" />
+          <span>识谛</span><em>shidea</em>
         </div>
         <button className="welcome-account" onClick={onOpenAccount}>
           {session ? <UserRound size={16} /> : <LogIn size={16} />}
@@ -470,7 +470,7 @@ function WelcomeScreen({
       </header>
       <section className="welcome-stage">
         <div className="welcome-copy">
-          {session ? <><p className="welcome-eyebrow">INKWISE / YOUR READING SPACE</p><h1>{displayName}，<br /><span>让理解从这一页开始</span></h1></> : <><p className="welcome-eyebrow">PDF INTELLIGENCE WORKSPACE</p><h1>读懂每一页<br /><span>也留下每一次思考。</span></h1><p className="welcome-description">墨知将 PDF 阅读、划词理解与 AI 问答放在同一处，让复杂文本回到清晰、专注的节奏。</p></>}
+          {session ? <><p className="welcome-eyebrow">SHIDEA / YOUR READING SPACE</p><h1>{displayName}，<br /><span>让理解从这一页开始</span></h1></> : <><p className="welcome-eyebrow">PDF INTELLIGENCE WORKSPACE</p><h1>读懂每一页<br /><span>也留下每一次思考。</span></h1><p className="welcome-description">识谛将 PDF 阅读、划词理解与 AI 问答放在同一处，让复杂文本回到清晰、专注的节奏。</p></>}
           <div className="welcome-actions">
             <button className="welcome-primary" onClick={onOpenFile}><FolderOpen size={18} />打开本地 PDF</button>
             <button className="welcome-secondary" onClick={onOpenUrl}><Link size={17} />导入论文链接</button>
@@ -480,7 +480,7 @@ function WelcomeScreen({
         <div className="welcome-art" aria-hidden="true">
           <div className="welcome-sheet welcome-sheet-back" />
           <div className="welcome-sheet welcome-sheet-front">
-            <div className="art-kicker">INKWISE / READING NOTES</div>
+            <div className="art-kicker">SHIDEA / READING NOTES</div>
             <div className="art-title">Understanding<br />through context.</div>
             <div className="art-lines"><i /><i /><i /><i /></div>
             <div className="art-highlight">The meaning of a sentence lives in the pages around it.</div>
@@ -496,13 +496,13 @@ function WelcomeScreen({
 
 function PdfStartupLoading() {
   return <main className="pdf-startup-loading" role="status" aria-live="polite">
-    <div className="pdf-startup-orbit"><img src="/brand/inkwise-mark.svg" alt="" /><i /></div>
-    <div><span>INKWISE READER</span><h1>正在加载你的 PDF</h1><p>正在建立安全连接并准备阅读空间…</p></div>
+    <div className="pdf-startup-orbit"><img src="/brand/shidea-mark.png" alt="" /><i /></div>
+    <div><span>SHIDEA READER</span><h1>正在加载你的 PDF</h1><p>正在建立安全连接并准备阅读空间…</p></div>
   </main>;
 }
 
 /** A self-running 3D transition inspired by the supplied mail-delivery scene.
- * The incoming PDF replaces the letter; the destination is Inkwise's reader. */
+ * The incoming PDF replaces the letter; the destination is shidea's reader. */
 function SpaceReaderLoadingScene() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -575,7 +575,7 @@ function SpaceReaderLoadingScene() {
     const logoMark = new THREE.Mesh(new THREE.TorusGeometry(.16, .052, 12, 24, Math.PI * 1.55), new THREE.MeshBasicMaterial({ color: 0x422d83 })); logoMark.position.set(.02, 2.33, 1.34); logoMark.rotation.z = .34; machine.add(logoMark);
     const labelCanvas = document.createElement("canvas"); labelCanvas.width = 512; labelCanvas.height = 96;
     const labelContext = labelCanvas.getContext("2d");
-    if (labelContext) { labelContext.fillStyle = "#f8f5ff"; labelContext.font = "700 50px Inter, sans-serif"; labelContext.textAlign = "center"; labelContext.fillText("INKWISE", 256, 63); }
+    if (labelContext) { labelContext.fillStyle = "#f2fbfa"; labelContext.font = "700 50px Inter, sans-serif"; labelContext.textAlign = "center"; labelContext.fillText("SHIDEA", 256, 63); }
     const labelTexture = new THREE.CanvasTexture(labelCanvas); labelTexture.colorSpace = THREE.SRGBColorSpace;
     const label = new THREE.Mesh(new THREE.PlaneGeometry(1.75, .33), new THREE.MeshBasicMaterial({ map: labelTexture, transparent: true })); label.position.set(0, 1.88, 1.53); machine.add(label);
     const base = outline(new THREE.Mesh(new THREE.CylinderGeometry(2.55, 3.05, .55, 40), new THREE.MeshStandardMaterial({ color: 0xff735f, roughness: .42, metalness: .12 }))); base.position.y = -1.72; base.castShadow = base.receiveShadow = true; machine.add(base);
@@ -863,7 +863,7 @@ function VisualPopover({ selection, pageRef, onClose, onTask, onFollowup }: {
     <div className="visual-popover-header"><button className="popover-collapse" aria-label={collapsed ? "展开浮窗" : "折叠浮窗"} title={collapsed ? "展开" : "折叠"} onClick={() => setCollapsed(value => !value)}><ChevronDown size={15}/></button><div className="visual-title"><ScanLine size={15}/><strong>图表选区</strong><span>第 {selection.pageNumber} 页</span></div><button className="popover-close" aria-label="关闭" title="关闭" onClick={() => onClose(selection.id)}><X size={15}/></button></div>
     {!collapsed && <div className="visual-popover-scroll">
       <img src={selection.imageDataUrl} alt="框选的 PDF 区域"/>
-      <div className="popover-actions visual-actions"><button onClick={() => onTask(selection, "explain")} disabled={selection.task?.state === "loading"}><ImageIcon size={14}/>AI 解读</button><button onClick={() => onTask(selection, "table")} disabled={selection.task?.state === "loading"}><Table2 size={14}/>提取表格</button><button title="复制图片" onClick={() => copyImage().catch(() => undefined)}><Copy size={14}/></button><a title="下载图片" href={selection.imageDataUrl} download={`inkwise-page-${selection.pageNumber}.jpg`}><Download size={14}/></a></div>
+      <div className="popover-actions visual-actions"><button onClick={() => onTask(selection, "explain")} disabled={selection.task?.state === "loading"}><ImageIcon size={14}/>AI 解读</button><button onClick={() => onTask(selection, "table")} disabled={selection.task?.state === "loading"}><Table2 size={14}/>提取表格</button><button title="复制图片" onClick={() => copyImage().catch(() => undefined)}><Copy size={14}/></button><a title="下载图片" href={selection.imageDataUrl} download={`shidea-page-${selection.pageNumber}.jpg`}><Download size={14}/></a></div>
       {selection.task && <div className={`popover-result ${selection.task.state}`}>{selection.task.state === "loading" ? "正在理解图表…" : <><ReactMarkdown>{selection.task.result || ""}</ReactMarkdown>{selection.task.state === "done" && <button className="visual-copy-result" onClick={() => navigator.clipboard.writeText(selection.task?.result || "")}><Copy size={13}/>复制结果</button>}</>}</div>}
       {selection.task?.kind === "explain" && selection.task.state === "done" && <form className="explain-followup" onSubmit={event => { event.preventDefault(); const value=followup.trim(); if (!value || !onFollowup) return; onFollowup(selection,value); setFollowup(""); }}><input value={followup} onChange={event => setFollowup(event.target.value)} placeholder="继续追问这张图…"/><button disabled={!followup.trim()}><Send size={14}/></button></form>}
     </div>}
@@ -1640,7 +1640,7 @@ function App() {
         const request = new XMLHttpRequest();
         // Packaged extensions use a chrome-extension:// origin and cannot
         // serve the Worker upload route locally. Route their upload through
-        // the deployed Inkwise Worker instead.
+        // the deployed shidea Worker instead.
         const uploadProxyOrigin = window.location.protocol === "chrome-extension:"
           ? PUBLIC_READER_ORIGIN
           : window.location.origin;
@@ -2064,7 +2064,7 @@ function App() {
     <div className={`app quiet-reading${nativePdfView ? " native-pdf-mode" : ""}`}>
       {pdfOpening && <div className="ink-opening document-loading" role="status" aria-label="正在将 PDF 放入阅读器">
         <SpaceReaderLoadingScene />
-        <div className="ink-opening-wordmark"><img src="/brand/inkwise-mark.svg" alt="" /><span>墨知</span><small>正在为你展开阅读空间</small></div>
+    <div className="ink-opening-wordmark"><img src="/brand/shidea-mark.png" alt="" /><span>识谛</span><small>正在为你展开阅读空间</small></div>
       </div>}
       <header className="topbar">
         <div className="topbar-left">
@@ -2076,8 +2076,8 @@ function App() {
             <PanelLeft size={18} />
           </IconButton>
           <strong>
-            <img className="brand-mark" src="/brand/inkwise-mark.svg" alt="" />
-            墨知 <span className="brand-english">Inkwise</span>
+            <img className="brand-mark" src="/brand/shidea-mark.png" alt="" />
+            识谛 <span className="brand-english">shidea</span>
           </strong>
           <span className="filename">{fileName || "未打开文档"}</span>
         </div>

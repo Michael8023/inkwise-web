@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>测试插件 DOI 导入</title>
+  <style>
+    body { font-family: sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }
+    .test-case { background: #f5f5f5; padding: 20px; margin: 20px 0; border-radius: 8px; }
+    .test-case h3 { margin-top: 0; }
+    input { width: 100%; padding: 8px; margin: 10px 0; font-size: 14px; }
+    button { padding: 10px 20px; background: #0F172A; color: white; border: none; border-radius: 4px; cursor: pointer; }
+    button:hover { background: #1E293B; }
+    .result { margin-top: 15px; padding: 10px; background: white; border-left: 3px solid #38BDF8; }
+    .error { border-left-color: #F97316; }
+  </style>
+</head>
+<body>
+  <h1>🧪 插件 DOI 导入测试</h1>
+
+  <div class="test-case">
+    <h3>测试 1: 开放获取论文 (应从 Unpaywall 获取)</h3>
+    <input type="text" value="10.1371/journal.pone.0230430" readonly>
+    <button onclick="testDoi('10.1371/journal.pone.0230430', 'test1')">测试</button>
+    <div id="test1" class="result" style="display:none;"></div>
+  </div>
+
+  <div class="test-case">
+    <h3>测试 2: 付费论文 (需要 Sci-Hub)</h3>
+    <input type="text" value="10.1038/nature.2015.17120" readonly>
+    <button onclick="testDoi('10.1038/nature.2015.17120', 'test2')">测试</button>
+    <div id="test2" class="result" style="display:none;"></div>
+  </div>
+
+  <div class="test-case">
+    <h3>测试 3: 完整 DOI 链接</h3>
+    <input type="text" value="https://doi.org/10.1371/journal.pone.0230430" readonly>
+    <button onclick="testDoi('https://doi.org/10.1371/journal.pone.0230430', 'test3')">测试</button>
+    <div id="test3" class="result" style="display:none;"></div>
+  </div>
+
+  <div class="test-case">
+    <h3>测试 4: 无效 DOI</h3>
+    <input type="text" value="10.1234/invalid.doi.test" readonly>
+    <button onclick="testDoi('10.1234/invalid.doi.test', 'test4')">测试</button>
+    <div id="test4" class="result" style="display:none;"></div>
+  </div>
+
+  <script>
+    const SUPABASE_URL = 'https://znkrejbcjysnqopytdui.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpua3JlamJjanlzbnFvcHl0ZHVpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY1OTM4NTIsImV4cCI6MjEwMjE2OTg1Mn0.yM_cSbiHi3SvAhXt6X_DSJvmKECax5QY0SLAUwgvyAM';
+
+    async function testDoi(doi, resultId) {
+      const resultDiv = document.getElementById(resultId);
+      resultDiv.style.display = 'block';
+      resultDiv.className = 'result';
+      resultDiv.innerHTML = '⏳ 测试中...';
+
+      const url = doi.startsWith('http') ? doi : `https://doi.org/${doi}`;
+
+      try {
+        const response = await fetch(`${SUPABASE_URL}/functions/v1/pdf-fetch`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': SUPABASE_ANON_KEY,
+            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+          },
+          body: JSON.stringify({
+            url: url,
+            resolveDoi: true
+          })
+        });
+
+        if (response.ok) {
+          const contentType = response.headers.get('content-type');
+          const contentLength = response.headers.get('content-length');
+          resultDiv.innerHTML = `
+            ✅ <strong>成功获取 PDF</strong><br>
+            Content-Type: ${contentType}<br>
+            Content-Length: ${contentLength} bytes (${(Number(contentLength) / 1024 / 1024).toFixed(2)} MB)
+          `;
+        } else {
+          const error = await response.json().catch(() => ({}));
+          resultDiv.className = 'result error';
+          resultDiv.innerHTML = `
+            ❌ <strong>请求失败</strong><br>
+            状态码: ${response.status}<br>
+            错误信息: ${error.error || '未知错误'}
+          `;
+        }
+      } catch (err) {
+        resultDiv.className = 'result error';
+        resultDiv.innerHTML = `
+          ❌ <strong>网络错误</strong><br>
+          ${err.message}
+        `;
+      }
+    }
+  </script>
+</body>
+</html>

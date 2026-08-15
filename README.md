@@ -1,4 +1,4 @@
-# 墨知 Inkwise
+# 识谛 shidea
 
 项目按应用边界拆分：`apps/extension` 是浏览器插件 UI，`apps/api` 是可独立部署的 Fastify 后端，`packages/contracts` 放置共享协议类型。
 
@@ -12,7 +12,7 @@
 
 ## 论文导入功能
 
-墨知支持通过 DOI 号自动获取论文 PDF，系统会按以下顺序尝试：
+识谛支持通过 DOI 号自动获取论文 PDF，系统会按以下顺序尝试：
 
 1. **出版商官方渠道** - 首先从 DOI 解析到的出版商网站获取
 2. **Unpaywall 开放获取** - 查询合法的 OA 资源（PubMed Central、预印本等）

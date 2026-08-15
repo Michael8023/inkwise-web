@@ -161,14 +161,14 @@ function AdminApp() {
   }
 
   if (!checked) return <div className="admin-loading">正在检查登录状态…</div>;
-  if (!session) return <main className="admin-login"><form onSubmit={login} className="admin-login-card"><img src="/brand/inkwise-mark.svg" alt="" /><span>INKWISE CONTROL</span><h1>后台管理</h1><label>管理员邮箱<input type="email" required value={email} onChange={event => setEmail(event.target.value)} /></label><label>密码<input type="password" required value={password} onChange={event => setPassword(event.target.value)} /></label>{error && <p className="admin-error">{error}</p>}<button type="submit">安全登录</button><a href="/">返回阅读器</a></form></main>;
+  if (!session) return <main className="admin-login"><form onSubmit={login} className="admin-login-card"><img src="/brand/shidea-mark.png" alt="" /><span>SHIDEA CONTROL</span><h1>后台管理</h1><label>管理员邮箱<input type="email" required value={email} onChange={event => setEmail(event.target.value)} /></label><label>密码<input type="password" required value={password} onChange={event => setPassword(event.target.value)} /></label>{error && <p className="admin-error">{error}</p>}<button type="submit">安全登录</button><a href="/">返回阅读器</a></form></main>;
 
   const pages = Math.max(1, Math.ceil(total / 30));
   const normalizedModelSearch = modelSearch.trim().toLowerCase();
   const visibleModels = catalogModels.filter(item => !normalizedModelSearch || `${item.name} ${item.id} ${item.provider}`.toLowerCase().includes(normalizedModelSearch));
   const modelGroups = visibleModels.reduce<Record<string, CatalogModel[]>>((groups, item) => { (groups[item.provider] ||= []).push(item); return groups; }, {});
   return <div className="admin-app">
-    <aside className="admin-nav"><div className="admin-logo"><img src="/brand/inkwise-mark.svg" alt="" /><div>墨知<strong>CONTROL</strong></div></div><nav><button className="active"><Users size={17}/>用户与额度</button></nav><div className="admin-nav-foot"><span>{session.user.email}</span><button onClick={() => supabase.auth.signOut()}><LogOut size={15}/>退出</button></div></aside>
+    <aside className="admin-nav"><div className="admin-logo"><img src="/brand/shidea-mark.png" alt="" /><div>识谛<strong>CONTROL</strong></div></div><nav><button className="active"><Users size={17}/>用户与额度</button></nav><div className="admin-nav-foot"><span>{session.user.email}</span><button onClick={() => supabase.auth.signOut()}><LogOut size={15}/>退出</button></div></aside>
     <main className="admin-main"><header><div><span>OPERATIONS</span><h1>用户额度管理</h1><p>管理套餐、积分余额并审计每一次人工调整。</p></div><div className="admin-stat"><Users size={18}/><span>注册用户<strong>{total}</strong></span></div></header>
       <section className="admin-toolbar"><form onSubmit={event => { event.preventDefault(); setPage(1); setQuery(search); }}><Search size={17}/><input placeholder="搜索邮箱、用户名" value={search} onChange={event => setSearch(event.target.value)}/><button>搜索</button></form><button className="admin-refresh" onClick={loadUsers}>刷新数据</button></section>
       {error && <div className="admin-alert"><ShieldCheck size={17}/>{error}</div>}

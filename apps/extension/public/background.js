@@ -22,15 +22,17 @@ async function autoOpenPdf(details) {
   const { autoOpenPdf = true } = await chrome.storage.sync.get({ autoOpenPdf: true });
   const current = await chrome.tabs.get(details.tabId).catch(() => null);
   if (!current || current.url?.startsWith(chrome.runtime.getURL(""))) return;
-  await chrome.tabs.update(details.tabId, { url: readerUrl(details.url, autoOpenPdf ? "reader" : "compact") });
+  await chrome.tabs.update(details.tabId, {
+    url: readerUrl(details.url, autoOpenPdf ? "reader" : "compact"),
+  });
 }
 
 chrome.webNavigation.onCommitted.addListener((details) => {
   void autoOpenPdf(details);
 });
 
-// Turning the switch back on from the extension popup immediately reopens the
-// active native-PDF tab in Inkwise, instead of waiting for the next PDF.
+// Turning the switch back on from the extension popup immediately opens the
+// active native PDF in the extension reader.
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== "sync" || changes.autoOpenPdf?.newValue !== true) return;
   chrome.tabs.query({ active: true, lastFocusedWindow: true }).then((tabs) => {

@@ -1,24 +1,24 @@
 {
   "manifest_version": 3,
-  "name": "墨知 Inkwise",
+  "name": "识谛 shidea",
   "version": "0.1.8",
   "description": "读懂每一页：本地 PDF 阅读、划词翻译与 AI 阅读助手。",
   "action": {
-    "default_title": "墨知个人中心",
+    "default_title": "识谛个人中心",
     "default_popup": "popup.html",
     "default_icon": {
-      "16": "brand/icon-16.png",
-      "32": "brand/icon-32.png",
-      "48": "brand/icon-48.png",
-      "128": "brand/icon-128.png"
+      "16": "brand/shidea-mark.png",
+      "32": "brand/shidea-mark.png",
+      "48": "brand/shidea-mark.png",
+      "128": "brand/shidea-mark.png"
     }
   },
   "background": { "service_worker": "background.js" },
   "icons": {
-    "16": "brand/icon-16.png",
-    "32": "brand/icon-32.png",
-    "48": "brand/icon-48.png",
-    "128": "brand/icon-128.png"
+    "16": "brand/shidea-mark.png",
+    "32": "brand/shidea-mark.png",
+    "48": "brand/shidea-mark.png",
+    "128": "brand/shidea-mark.png"
   },
   "permissions": ["storage", "tabs", "webNavigation"],
   "host_permissions": [
