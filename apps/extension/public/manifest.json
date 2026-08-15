@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "识谛 shidea",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "读懂每一页：本地 PDF 阅读、划词翻译与 AI 阅读助手。",
   "action": {
     "default_title": "识谛个人中心",
