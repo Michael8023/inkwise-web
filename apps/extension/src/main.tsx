@@ -1528,20 +1528,22 @@ function App() {
     setSummary({}); setSummaryOpen({ short: false, full: false });
     setMessages([]); setQuestion(""); setPageInput("1"); setCurrentPage(1);
   }
-  async function finishPdfOpen(document: any, initialData?: ArrayBuffer) {
+  async function finishPdfOpen(document: any) {
     setPdf(document);
     setDocumentId(crypto.randomUUID());
     setUrlLoading(false);
     setOutline(((await document.getOutline().catch(() => [])) ?? []) as OutlineItem[]);
-    // When loading by URL, PDF.js uses HTTP ranges so the first page can be
-    // shown immediately.  getData completes the cached download afterwards
-    // for layout analysis and other byte-based features.
-    if (initialData) {
-      pdfBytes.current = initialData.slice(0);
-    } else {
+    // PDF.js takes ownership of the TypedArray passed to getDocument(), so
+    // retain analysis bytes from its own cached document instead of reusing
+    // the caller's now-detached ArrayBuffer.
+    try {
       const downloaded = await document.getData();
       if (downloaded.byteLength > MAX_PDF_IMPORT_BYTES) throw new Error("PDF_IMPORT_TOO_LARGE");
       pdfBytes.current = downloaded.buffer.slice(downloaded.byteOffset, downloaded.byteOffset + downloaded.byteLength) as ArrayBuffer;
+    } catch {
+      // Analysis enhancements are optional; a readable PDF must remain open
+      // even when cached bytes are unavailable or exceed their safe limit.
+      pdfBytes.current = null;
     }
     try {
       const pages: string[] = [];
@@ -1565,7 +1567,7 @@ function App() {
     try {
       beginPdfOpen(name);
       const document = await pdfjsLib.getDocument({ data: new Uint8Array(data) }).promise;
-      await finishPdfOpen(document, data);
+      await finishPdfOpen(document);
     } catch {
       setUrlLoading(false);
       setPdfOpening(false);
@@ -2012,7 +2014,10 @@ function App() {
   }
 
   if (!pdf) {
-    if (urlLoading) return <div className="welcome-app"><PdfStartupLoading />{!embeddedReader && <ExtensionAutoOpenToggle />}</div>;
+    // Both local and URL imports clear the previous document before PDF.js
+    // resolves the new one. Keep the loading view mounted during that gap so
+    // the welcome screen never flashes between import and reader states.
+    if (pdfOpening || urlLoading) return <div className="welcome-app"><PdfStartupLoading />{!embeddedReader && <ExtensionAutoOpenToggle />}</div>;
     return (
       <div
         className="welcome-app"
