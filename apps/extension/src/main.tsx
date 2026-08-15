@@ -1791,7 +1791,7 @@ function App() {
     } finally { setUrlLoading(false); }
   }
   async function openPdfUrl() {
-    await loadPdfUrl(paperUrl);
+    await loadPdfUrl(paperUrl, true);
   }
   async function requestSummary(kind: "short" | "full") {
     if (!documentReady || !model || !documentId) return;
