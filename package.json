@@ -13,7 +13,7 @@
     "test": "npm run test --workspaces"
   },
   "dependencies": {
-    "three": "^0.180.0"
+    "three": "^0.185.1"
   },
   "devDependencies": {
     "@types/three": "^0.185.4"
