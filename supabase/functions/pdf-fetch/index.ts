@@ -4,18 +4,6 @@ import { body, rateLimit, user } from "../_shared/core.ts";
 const MAX_BYTES = 40 * 1024 * 1024;
 const MAX_REDIRECTS = 3;
 const DOI_HOSTS = new Set(["doi.org", "dx.doi.org"]);
-const SCIHUB_MIRRORS = [
-  "https://sci-hub.ru",
-  "https://sci-hub.ren",
-  "https://sci-hub.wf",
-  "https://sci-hub.st",
-  "https://sci-hub.se",
-];
-
-// Alternative academic sources
-const ALTERNATIVE_SOURCES = [
-  { name: "Unpaywall", url: (doi: string) => `https://api.unpaywall.org/v2/${doi}?email=pdf-reader@supabase.io` },
-];
 
 function unsafeAddress(host: string) {
   const value = host.toLowerCase().replace(/^\[|\]$/g, "");
@@ -60,6 +48,162 @@ async function assertPublicDns(url: URL) {
   ]);
   const addresses = records.flatMap((result) => result.status === "fulfilled" ? result.value : []);
   if (!addresses.length || addresses.some((address) => unsafeAddress(address))) throw new Error("URL_NOT_ALLOWED");
+}
+
+async function getAvailableScihubMirrors(): Promise<string[]> {
+  try {
+    const response = await fetch("https://www.sci-hub.shop/", {
+      signal: AbortSignal.timeout(8000),
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+      }
+    });
+
+    if (!response.ok) return [];
+
+    const html = await response.text();
+
+    // Extract Sci-Hub mirror links from the HTML
+    // The page typically lists mirrors like: https://sci-hub.se, https://sci-hub.st, etc.
+    const mirrors: string[] = [];
+    const linkPattern = /https?:\/\/sci-?hub\.[a-z]{2,}/gi;
+    const matches = html.match(linkPattern);
+
+    if (matches) {
+      const uniqueMirrors = [...new Set(matches)];
+      // Validate and filter mirrors
+      for (const mirror of uniqueMirrors) {
+        try {
+          const url = new URL(mirror);
+          if (url.protocol === "https:" && !unsafeAddress(url.hostname)) {
+            mirrors.push(mirror);
+          }
+        } catch {
+          continue;
+        }
+      }
+    }
+
+    return mirrors;
+  } catch {
+    // Fallback to known stable mirrors if fetching fails
+    return [
+      "https://sci-hub.se",
+      "https://sci-hub.st",
+      "https://sci-hub.ru"
+    ];
+  }
+}
+
+async function tryScihub(doi: string): Promise<Response | null> {
+  try {
+    const mirrors = await getAvailableScihubMirrors();
+
+    if (!mirrors.length) return null;
+
+    // Try each mirror
+    for (const mirror of mirrors) {
+      try {
+        const scihubUrl = `${mirror}/${doi}`;
+        const scihubUrlObj = target(scihubUrl);
+        await assertPublicDns(scihubUrlObj);
+
+        const pageResponse = await fetch(scihubUrlObj, {
+          redirect: "follow",
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+          },
+          signal: AbortSignal.timeout(12000)
+        });
+
+        if (!pageResponse.ok) continue;
+
+        const contentType = (pageResponse.headers.get("content-type") || "").toLowerCase();
+
+        // If Sci-Hub directly returned a PDF
+        if (contentType.includes("pdf")) {
+          const size = Number(pageResponse.headers.get("content-length") || 0);
+          if (size > 0 && size <= MAX_BYTES) {
+            return pageResponse;
+          }
+        }
+
+        // Parse the HTML to find the PDF embed or download link
+        if (contentType.includes("html")) {
+          const html = await pageResponse.text();
+
+          // Sci-Hub typically embeds PDF in an iframe or provides a direct link
+          const embedPattern = /<iframe[^>]+src=["']([^"']+)["']/i;
+          const linkPattern = /<a[^>]+href=["']([^"']+\.pdf[^"']*)["']/i;
+          const buttonPattern = /<button[^>]+onclick=["']location\.href=["']([^"']+)["']/i;
+
+          let pdfPath: string | null = null;
+
+          // Try iframe embed first (most common)
+          const embedMatch = html.match(embedPattern);
+          if (embedMatch) {
+            pdfPath = embedMatch[1];
+          }
+
+          // Try direct link
+          if (!pdfPath) {
+            const linkMatch = html.match(linkPattern);
+            if (linkMatch) pdfPath = linkMatch[1];
+          }
+
+          // Try button onclick
+          if (!pdfPath) {
+            const buttonMatch = html.match(buttonPattern);
+            if (buttonMatch) pdfPath = buttonMatch[1];
+          }
+
+          if (pdfPath) {
+            // Resolve relative URLs
+            let pdfUrl: URL;
+            if (pdfPath.startsWith("//")) {
+              pdfUrl = new URL(`https:${pdfPath}`);
+            } else if (pdfPath.startsWith("/")) {
+              pdfUrl = new URL(pdfPath, mirror);
+            } else if (pdfPath.startsWith("http")) {
+              pdfUrl = new URL(pdfPath);
+            } else {
+              continue;
+            }
+
+            await assertPublicDns(pdfUrl);
+
+            const pdfResponse = await fetch(pdfUrl, {
+              redirect: "follow",
+              headers: {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Accept": "application/pdf",
+                "Referer": scihubUrl
+              },
+              signal: AbortSignal.timeout(15000)
+            });
+
+            if (pdfResponse.ok) {
+              const pdfContentType = (pdfResponse.headers.get("content-type") || "").toLowerCase();
+              if (pdfContentType.includes("pdf")) {
+                const size = Number(pdfResponse.headers.get("content-length") || 0);
+                if (size > 0 && size <= MAX_BYTES) {
+                  return pdfResponse;
+                }
+              }
+            }
+          }
+        }
+      } catch {
+        // Try next mirror
+        continue;
+      }
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
 }
 
 async function tryUnpaywall(doi: string): Promise<Response | null> {
@@ -168,72 +312,6 @@ async function tryUnpaywall(doi: string): Promise<Response | null> {
   return null;
 }
 
-async function tryScihub(doi: string): Promise<Response | null> {
-  // Try multiple Sci-Hub mirrors to find the PDF
-  for (const mirror of SCIHUB_MIRRORS) {
-    try {
-      const scihubUrl = new URL(`${mirror}/${doi}`);
-      await assertPublicDns(scihubUrl);
-
-      // First request to get the HTML page
-      const pageResponse = await fetch(scihubUrl, {
-        redirect: "manual",
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
-        },
-        signal: AbortSignal.timeout(10000) // 10 second timeout per mirror
-      });
-
-      if (!pageResponse.ok) continue;
-
-      const contentType = (pageResponse.headers.get("content-type") || "").toLowerCase();
-
-      // If we got a PDF directly, return it
-      if (contentType.includes("pdf")) {
-        const size = Number(pageResponse.headers.get("content-length") || 0);
-        if (size > 0 && size <= MAX_BYTES) {
-          return pageResponse;
-        }
-      }
-
-      // Otherwise parse HTML to find PDF link
-      const html = await pageResponse.text();
-
-      // Check if it's a captcha page
-      if (html.includes('проверка на робота') || html.includes('captcha') || html.includes('altcha')) {
-        continue; // Skip this mirror if it requires captcha
-      }
-
-      const pdfUrl = findPdfUrl(html, scihubUrl);
-
-      if (pdfUrl) {
-        await assertPublicDns(pdfUrl);
-        const pdfResponse = await fetch(pdfUrl, {
-          redirect: "follow",
-          headers: {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Accept": "application/pdf"
-          },
-          signal: AbortSignal.timeout(15000)
-        });
-
-        if (pdfResponse.ok) {
-          const size = Number(pdfResponse.headers.get("content-length") || 0);
-          if (size > 0 && size <= MAX_BYTES) {
-            return pdfResponse;
-          }
-        }
-      }
-    } catch {
-      // Try next mirror
-      continue;
-    }
-  }
-
-  return null;
-}
-
 Deno.serve(async (req) => {
   const p = preflight(req); if (p) return p;
   try {
@@ -291,7 +369,7 @@ Deno.serve(async (req) => {
         // Try Unpaywall first (legal open access)
         response = await tryUnpaywall(doi);
 
-        // If Unpaywall fails, try Sci-Hub
+        // If Unpaywall didn't work, try Sci-Hub mirrors
         if (!response) {
           response = await tryScihub(doi);
         }

@@ -97,6 +97,7 @@ type ChatMessage = { role: "user" | "assistant"; content: string };
 type AuthSession = { user: { id: string; email?: string; user_metadata?: Record<string, unknown> } };
 type Usage = { plan: string; creditsRemaining: number; periodEnd: string | null };
 const PUBLIC_READER_ORIGIN = "https://www.inkwise.site";
+const MAX_PDF_IMPORT_BYTES = 128 * 1024 * 1024;
 
 function modelBrand(modelId: string) {
   const value = modelId.toLowerCase();
@@ -330,9 +331,10 @@ const apiErrors: Record<string, string> = {
   REQUEST_TIMEOUT: "请求超时，请检查网络后重试。",
   MINERU_FILE_TOO_LARGE: "当前 PDF 超过 15MB，暂时无法进行智能版面分析。",
   MINERU_UPLOAD_FAILED: "文档上传失败，请稍后重试。",
-  DOI_PDF_NOT_FOUND: "该 DOI 对应的 PDF 暂时无法获取，出版商和学术资源库均未能提供访问。请尝试手动下载后导入。",
+  DOI_PDF_NOT_FOUND: "该 DOI 对应的 PDF 暂时无法获取。我们已尝试出版商官方渠道、Unpaywall 开放获取资源以及 Sci-Hub 镜像，但均未成功。请尝试通过机构访问或手动下载后导入。",
   PDF_UPSTREAM_401: "该论文需要订阅权限，无法自动获取。请通过机构访问或手动下载后导入。",
   PDF_UPSTREAM_403: "该论文访问受限，无法自动获取。请通过机构访问或手动下载后导入。",
+  PDF_IMPORT_TOO_LARGE: "该 PDF 超过 128 MB，暂时无法通过链接导入。",
 };
 function readableApiError(error: unknown, fallback: string) { const code=error instanceof Error?error.message:String(error||""); return apiErrors[code]||fallback; }
 
@@ -375,11 +377,11 @@ function UrlImportDialog({ value, error, loading, onChange, onClose, onSubmit }:
   return <div className="auth-backdrop url-import-backdrop"><form className="auth-dialog url-import-dialog" onSubmit={event => { event.preventDefault(); onSubmit(); }}>
     <button type="button" className="popover-close" onClick={onClose} aria-label="关闭导入窗口"><X size={16} /></button>
     <div className="url-import-icon"><Link size={20} /></div>
-    <div className="url-import-heading"><span>INKWISE / IMPORT</span><h2>导入论文链接</h2><p>支持公开 PDF 链接、doi.org 链接或纯 DOI；我们会自动从出版商或学术资源库获取 PDF。</p></div>
+    <div className="url-import-heading"><span>INKWISE / IMPORT</span><h2>导入论文链接</h2><p>支持公开 PDF 链接、doi.org 链接或纯 DOI；我们会尝试导入出版商或开放资源提供的 PDF。</p></div>
     <label className="url-import-field">PDF 或 DOI<input type="text" required autoFocus placeholder="https://doi.org/10.xxxx/... 或 10.xxxx/..." value={value} onChange={event => onChange(event.target.value)} /></label>
     {error && <p className="url-import-error">{error}</p>}
     <button className="url-import-submit" type="submit" disabled={loading}>{loading ? "正在导入…" : "在当前页面打开"}<ChevronRight size={17} /></button>
-    <p className="url-import-help">DOI 解析会先尝试出版商官方渠道，如不可访问则自动从 Unpaywall、Europe PMC、Sci-Hub 等学术资源库获取。</p>
+    <p className="url-import-help">DOI 解析会先尝试出版商官方渠道，再查询 Unpaywall 等开放获取资源，最后尝试 Sci-Hub 实时镜像。</p>
   </form></div>;
 }
 
@@ -487,6 +489,13 @@ function WelcomeScreen({
       <footer className="welcome-footer"><span>支持本地 PDF 拖放</span><span>·</span><span>你的文档与你同在</span></footer>
     </main>
   );
+}
+
+function PdfStartupLoading() {
+  return <main className="pdf-startup-loading" role="status" aria-live="polite">
+    <div className="pdf-startup-orbit"><img src="/brand/inkwise-mark.svg" alt="" /><i /></div>
+    <div><span>INKWISE READER</span><h1>正在加载你的 PDF</h1><p>正在建立安全连接并准备阅读空间…</p></div>
+  </main>;
 }
 
 /** A self-running 3D transition inspired by the supplied mail-delivery scene.
@@ -1283,9 +1292,13 @@ function App() {
   const [authVerifying, setAuthVerifying] = useState(false);
   const [urlOpen, setUrlOpen] = useState(false);
   const [paperUrl, setPaperUrl] = useState("");
-  const [urlLoading, setUrlLoading] = useState(false);
+  const [urlLoading, setUrlLoading] = useState(() => {
+    const params = new URL(window.location.href).searchParams;
+    return Boolean(params.get("openPdfUrl") || (params.get("embedded") === "1" && params.get("startup") === "1"));
+  });
   const [urlError, setUrlError] = useState("");
   const [nativePdfView, setNativePdfView] = useState(() => new URL(window.location.href).searchParams.get("mode") === "compact");
+  const embeddedReader = new URL(window.location.href).searchParams.get("embedded") === "1";
 
   useEffect(() => {
     const trustedOrigins = new Set([window.location.origin, PUBLIC_READER_ORIGIN]);
@@ -1293,7 +1306,13 @@ function App() {
       if (event.data?.type === "inkwise-open-pdf-ready") {
         return;
       }
-      if (!trustedOrigins.has(event.origin) || event.data?.type !== "inkwise-open-pdf") return;
+      const fromEmbeddedParent = embeddedReader && event.source === window.parent;
+      if (!trustedOrigins.has(event.origin) && !fromEmbeddedParent) return;
+      if (event.data?.type === "inkwise-load-pdf-url" && fromEmbeddedParent && typeof event.data.url === "string") {
+        void loadPdfUrl(event.data.url, true);
+        return;
+      }
+      if (event.data?.type !== "inkwise-open-pdf") return;
       const candidate = event.data.bytes;
       const bytes = candidate instanceof ArrayBuffer
         ? candidate
@@ -1309,6 +1328,9 @@ function App() {
       }
     };
     window.addEventListener("message", onMessage);
+    if (embeddedReader && window.parent !== window) {
+      window.parent.postMessage({ type: "inkwise-reader-ready" }, "*");
+    }
     if (window.opener && window.opener !== window) {
       try { window.opener.postMessage({ type: "inkwise-open-pdf-ready" }, PUBLIC_READER_ORIGIN); } catch { /* opener may be unavailable */ }
     }
@@ -1341,12 +1363,19 @@ function App() {
     if (!url && !openAccount) return;
     window.history.replaceState({}, "", window.location.pathname);
     if (openAccount) setAuthOpen(true);
-    if (url) { setPaperUrl(url); void loadPdfUrl(url); }
+    if (url) { setPaperUrl(url); void loadPdfUrl(url, true); }
   }, []);
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => setSession(data.session as AuthSession | null));
-    const { data } = supabase.auth.onAuthStateChange((_event, next) => {
-      setSession(next as AuthSession | null);
+    const applySession = (next: AuthSession | null, closeDialog = false) => {
+      setSession(next);
+      if (next) {
+        if (closeDialog) setAuthOpen(false);
+        void refreshUsage();
+      }
+    };
+    supabase.auth.getSession().then(({ data }) => applySession(data.session as AuthSession | null));
+    const { data } = supabase.auth.onAuthStateChange((event, next) => {
+      applySession(next as AuthSession | null, event === "SIGNED_IN");
     });
     return () => data.subscription.unsubscribe();
   }, []);
@@ -1377,12 +1406,13 @@ function App() {
     void runMineruLayout();
   }, [nativePdfView, session, documentReady, documentId]);
   useEffect(() => {
-    if (!documentReady) return;
+    if (!pdf) return;
     // Let the ink bloom complete before removing the transition layer. This
-    // keeps the PDF hidden until the full-screen wash has faded into it.
+    // keeps the PDF hidden until the full-screen wash has faded into it, but
+    // does not wait for large documents to finish full-text extraction.
     const timer = window.setTimeout(() => setPdfOpening(false), 3050);
     return () => window.clearTimeout(timer);
-  }, [documentReady]);
+  }, [pdf]);
   useEffect(() => {
     if (layoutState.state !== "done" && layoutState.state !== "error") return;
     setLayoutNoticeVisible(true);
@@ -1431,8 +1461,11 @@ function App() {
         setAuthVerifying(true);
         return;
       } else {
-        const { error } = await supabase.auth.signInWithPassword({ email: authEmail, password: authPassword });
+        const { data, error } = await supabase.auth.signInWithPassword({ email: authEmail, password: authPassword });
         if (error) throw error;
+        // Do not wait for the asynchronous auth-state event: otherwise the
+        // reader can briefly stay in its logged-out UI after a successful login.
+        if (data.session) setSession(data.session as AuthSession);
       }
       setAuthOpen(false);
       setAuthPassword("");
@@ -1452,8 +1485,9 @@ function App() {
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "SIGNUP_FAILED");
-      const { error } = await supabase.auth.signInWithPassword({ email: authEmail, password: authPassword });
+      const { data: signInData, error } = await supabase.auth.signInWithPassword({ email: authEmail, password: authPassword });
       if (error) throw error;
+      if (signInData.session) setSession(signInData.session as AuthSession);
       setAuthOpen(false); setAuthVerifying(false); setAuthCode(""); setAuthPassword("");
     } catch (error) { const message=error instanceof Error?error.message:"SIGNUP_FAILED"; setAuthError(apiErrors[message] || message); }
   }
@@ -1471,6 +1505,7 @@ function App() {
     } catch (error) { const message=error instanceof Error?error.message:"EMAIL_SEND_FAILED"; setAuthError(apiErrors[message] || message); }
   }
   async function signOut() {
+    setSession(null); setUsage(null);
     await supabase.auth.signOut();
   }
   useEffect(() => {
@@ -1481,16 +1516,30 @@ function App() {
     return () => window.removeEventListener("keydown", close);
   }, []);
 
-  async function openPdfData(data: ArrayBuffer, name: string) {
+  function beginPdfOpen(name: string) {
+    setPdfOpening(true);
+    setSelections([]); setHighlights([]); setVisualSelections([]); setVisualMode(false); setMineruRegions([]); setMineruReady(false); setLayoutState({ state: "idle" }); setLayoutNoticeVisible(false); autoLayoutDocument.current = "";
+    setDocumentReady(false); setDocumentText(""); setPdf(null); setOutline([]);
+    setFileName(name);
+    setSummary({}); setSummaryOpen({ short: false, full: false });
+    setMessages([]); setQuestion(""); setPageInput("1"); setCurrentPage(1);
+  }
+  async function finishPdfOpen(document: any, initialData?: ArrayBuffer) {
+    setPdf(document);
+    setDocumentId(crypto.randomUUID());
+    setUrlLoading(false);
+    setOutline(((await document.getOutline().catch(() => [])) ?? []) as OutlineItem[]);
+    // When loading by URL, PDF.js uses HTTP ranges so the first page can be
+    // shown immediately.  getData completes the cached download afterwards
+    // for layout analysis and other byte-based features.
+    if (initialData) {
+      pdfBytes.current = initialData.slice(0);
+    } else {
+      const downloaded = await document.getData();
+      if (downloaded.byteLength > MAX_PDF_IMPORT_BYTES) throw new Error("PDF_IMPORT_TOO_LARGE");
+      pdfBytes.current = downloaded.buffer.slice(downloaded.byteOffset, downloaded.byteOffset + downloaded.byteLength) as ArrayBuffer;
+    }
     try {
-      setPdfOpening(true);
-      setSelections([]); setHighlights([]); setVisualSelections([]); setVisualMode(false); setMineruRegions([]); setMineruReady(false); setLayoutState({ state: "idle" }); setLayoutNoticeVisible(false); autoLayoutDocument.current = "";
-      setDocumentReady(false);
-      setFileName(name);
-      pdfBytes.current = data.slice(0);
-      const document = await pdfjsLib.getDocument({
-        data: new Uint8Array(data),
-      }).promise;
       const pages: string[] = [];
       for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber++) {
         const page = await document.getPage(pageNumber);
@@ -1500,20 +1549,41 @@ function App() {
       const nextDocumentText = pages
         .map((text, index) => `\n[第 ${index + 1} 页]\n${text}`)
         .join("\n");
-      setPdf(document); setDocumentId(crypto.randomUUID()); setDocumentText(nextDocumentText);
-      setSummary({});
-      setSummaryOpen({ short: false, full: false });
-      setMessages([]);
-      setQuestion(""); setPageInput("1");
-      setOutline(((await document.getOutline()) ?? []) as OutlineItem[]);
-      setCurrentPage(1);
+      setDocumentText(nextDocumentText);
       setDocumentReady(true);
     } catch {
+      // A damaged text layer should not prevent ordinary PDF reading.
+      setDocumentText("");
+      setDocumentReady(true);
+    }
+  }
+  async function openPdfData(data: ArrayBuffer, name: string) {
+    try {
+      beginPdfOpen(name);
+      const document = await pdfjsLib.getDocument({ data: new Uint8Array(data) }).promise;
+      await finishPdfOpen(document, data);
+    } catch {
+      setUrlLoading(false);
       setPdfOpening(false);
       setPdf(null);
       setOutline([]);
       setDocumentReady(false);
       setFileName("无法打开该 PDF");
+    }
+  }
+  async function openPdfRemote(url: URL, name: string) {
+    try {
+      beginPdfOpen(name);
+      const document = await pdfjsLib.getDocument({ url: url.toString(), withCredentials: false }).promise;
+      await finishPdfOpen(document);
+    } catch {
+      setUrlLoading(false);
+      setPdfOpening(false);
+      setPdf(null);
+      setOutline([]);
+      setDocumentReady(false);
+      setFileName("无法打开该 PDF");
+      throw new Error("PDF_URL_FETCH_FAILED");
     }
   }
   async function openFile(file: File) {
@@ -1636,10 +1706,10 @@ function App() {
     return trimmed;
   }
   function isDoiLink(url: URL) { return ["doi.org", "dx.doi.org"].includes(url.hostname.toLowerCase()) && /^\/10\.\d{4,9}\//i.test(url.pathname); }
-  async function loadPdfUrl(value: string) {
+  async function loadPdfUrl(value: string, showErrorDialog = false) {
     setUrlError("");
     let parsed: URL;
-    try { parsed = validatePdfUrl(normalizePaperUrl(value)); } catch (error) { setUrlError(error instanceof Error ? error.message : "链接格式不正确。"); return; }
+    try { parsed = validatePdfUrl(normalizePaperUrl(value)); } catch (error) { setUrlError(error instanceof Error ? error.message : "链接格式不正确。"); if (showErrorDialog) setUrlOpen(true); setUrlLoading(false); return; }
     setUrlLoading(true);
     try {
       let response: Response;
@@ -1656,8 +1726,11 @@ function App() {
         }
       } else {
         try {
-          response = await fetch(parsed.toString());
-          if (!response.ok) throw new Error(`HTTP_${response.status}`);
+          const rawName = decodeURIComponent(parsed.pathname.split("/").pop() || "在线论文.pdf");
+          await openPdfRemote(parsed, rawName.endsWith(".pdf") ? rawName : `${rawName}.pdf`);
+          setUrlOpen(false);
+          setPaperUrl("");
+          return;
         } catch {
           if (!session) throw new Error("该站点不允许跨域读取，请登录后通过安全代理导入。");
           response = await functionRequest("pdf-fetch", {
@@ -1673,9 +1746,9 @@ function App() {
       }
       const contentType = response.headers.get("content-type") || "";
       const contentLength = Number(response.headers.get("content-length") || 0);
-      if (contentLength > 40 * 1024 * 1024) throw new Error("PDF 文件超过 40 MB 限制。");
+      if (contentLength > MAX_PDF_IMPORT_BYTES) throw new Error("PDF_IMPORT_TOO_LARGE");
       const data = await response.arrayBuffer();
-      if (data.byteLength > 40 * 1024 * 1024) throw new Error("PDF 文件超过 40 MB 限制。");
+      if (data.byteLength > MAX_PDF_IMPORT_BYTES) throw new Error("PDF_IMPORT_TOO_LARGE");
       if (contentType && !contentType.includes("pdf") && new Uint8Array(data.slice(0, 4)).join(",") !== "37,80,68,70") {
         throw new Error("该链接返回的不是 PDF 文件。");
       }
@@ -1686,6 +1759,7 @@ function App() {
       setPaperUrl("");
     } catch (error) {
       setUrlError(readableApiError(error, "无法读取该 PDF 链接。"));
+      if (showErrorDialog) setUrlOpen(true);
     } finally { setUrlLoading(false); }
   }
   async function openPdfUrl() {
@@ -1910,6 +1984,7 @@ function App() {
   }
 
   if (!pdf) {
+    if (urlLoading) return <div className="welcome-app"><PdfStartupLoading />{!embeddedReader && <ExtensionAutoOpenToggle />}</div>;
     return (
       <div
         className="welcome-app"
@@ -1929,7 +2004,7 @@ function App() {
         <input ref={fileInput} className="welcome-file-input" type="file" accept="application/pdf" onChange={(event) => event.target.files?.[0] && openFile(event.target.files[0])} />
         {authOpen && (session ? <AccountDialog session={session} usage={usage} onClose={() => setAuthOpen(false)} onSignOut={() => { signOut(); setAuthOpen(false); }} /> : <AuthDialog mode={authMode} email={authEmail} password={authPassword} name={authName} code={authCode} error={authError} notice={authNotice} verifying={authVerifying} onClose={() => setAuthOpen(false)} onSubmit={submitAuth} onVerify={verifyEmailCode} onResend={resendEmailCode} onModeChange={(nextMode) => { setAuthMode(nextMode); setAuthVerifying(false); setAuthError(""); setAuthNotice(""); }} onEmail={setAuthEmail} onPassword={setAuthPassword} onName={setAuthName} onCode={setAuthCode} />)}
         {urlOpen && <UrlImportDialog value={paperUrl} error={urlError} loading={urlLoading} onChange={value => { setPaperUrl(value); setUrlError(""); }} onClose={() => setUrlOpen(false)} onSubmit={openPdfUrl} />}
-        <ExtensionAutoOpenToggle />
+        {!embeddedReader && <ExtensionAutoOpenToggle />}
       </div>
     );
   }
@@ -1968,7 +2043,7 @@ function App() {
           </div>
         </section>
       </main>
-      <ExtensionAutoOpenToggle />
+      {!embeddedReader && <ExtensionAutoOpenToggle />}
     </div>;
   }
 
@@ -2290,7 +2365,7 @@ function App() {
       </main>
       {authOpen && (session ? <AccountDialog session={session} usage={usage} onClose={() => setAuthOpen(false)} onSignOut={() => { signOut(); setAuthOpen(false); }} /> : <AuthDialog mode={authMode} email={authEmail} password={authPassword} name={authName} code={authCode} error={authError} notice={authNotice} verifying={authVerifying} onClose={() => setAuthOpen(false)} onSubmit={submitAuth} onVerify={verifyEmailCode} onResend={resendEmailCode} onModeChange={(nextMode) => { setAuthMode(nextMode); setAuthVerifying(false); setAuthError(""); setAuthNotice(""); }} onEmail={setAuthEmail} onPassword={setAuthPassword} onName={setAuthName} onCode={setAuthCode} />)}
       {urlOpen && <UrlImportDialog value={paperUrl} error={urlError} loading={urlLoading} onChange={value => { setPaperUrl(value); setUrlError(""); }} onClose={() => setUrlOpen(false)} onSubmit={openPdfUrl} />}
-      <ExtensionAutoOpenToggle />
+      {!embeddedReader && <ExtensionAutoOpenToggle />}
     </div>
   );
 }

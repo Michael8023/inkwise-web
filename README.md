@@ -2,6 +2,24 @@
 
 项目按应用边界拆分：`apps/extension` 是浏览器插件 UI，`apps/api` 是可独立部署的 Fastify 后端，`packages/contracts` 放置共享协议类型。
 
+## 主要功能
+
+- 📄 **PDF 阅读器** - 流畅的 PDF 阅读体验，支持划词、高亮、注释
+- 🤖 **AI 理解** - 划词翻译、智能解释、文档问答、摘要生成
+- 🔍 **智能导入** - 支持 DOI 自动解析，多源获取学术论文
+- 🎨 **图表识别** - 框选图片、表格、公式，AI 自动解读
+- 📑 **版面分析** - 智能识别文档结构（图片、表格、公式）
+
+## 论文导入功能
+
+墨知支持通过 DOI 号自动获取论文 PDF，系统会按以下顺序尝试：
+
+1. **出版商官方渠道** - 首先从 DOI 解析到的出版商网站获取
+2. **Unpaywall 开放获取** - 查询合法的 OA 资源（PubMed Central、预印本等）
+3. **Sci-Hub 实时镜像** - 自动从 https://www.sci-hub.shop/ 获取最新可用镜像并尝试下载
+
+详见 [SCIHUB_INTEGRATION.md](./SCIHUB_INTEGRATION.md)
+
 ## 开发
 
 ```bash
@@ -21,3 +39,7 @@ npm run dev:api
 ## 百度翻译配置
 
 复制 `apps/api/.env.example` 为 `apps/api/.env`，在其中填写百度 AI Platform 的 `BAIDU_TRANSLATE_API_KEY` 和 `BAIDU_TRANSLATE_SECRET_KEY`。API 会在服务端自动获取并缓存 `access_token`；不要将任何密钥写入扩展代码或提交到 Git。
+
+## 测试
+
+查看 [TEST_SCIHUB.md](./TEST_SCIHUB.md) 了解如何测试 DOI 导入和 Sci-Hub 集成功能。
