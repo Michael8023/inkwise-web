@@ -105,11 +105,58 @@ async function assertPublicDns(url: URL) {
 }
 
 async function getAvailableScihubMirrors(): Promise<string[]> {
-  // Directly use fallback mirrors - they are reliable and tested
-  // Fetching from sci-hub.shop is slow and unreliable
-  const mirrors = getFallbackMirrors();
-  console.log(`Using ${mirrors.length} fallback Sci-Hub mirrors`);
-  return mirrors;
+  try {
+    console.log("Fetching live Sci-Hub mirrors from sci-hub.shop...");
+
+    const response = await fetch("https://sci-hub.shop/", {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "text/html"
+      },
+      signal: AbortSignal.timeout(8000)
+    });
+
+    if (!response.ok) {
+      console.log(`Failed to fetch from sci-hub.shop: ${response.status}`);
+      return getFallbackMirrors();
+    }
+
+    const html = await response.text();
+
+    // Extract mirror URLs from the page
+    // Look for links in the format: <a href="https://sci-hub.xx">
+    const mirrorPattern = /<a[^>]+href=["'](https?:\/\/(?:www\.)?sci-hub\.[a-z]{2,}(?:\/)?)["']/gi;
+    const mirrors = new Set<string>();
+
+    let match;
+    while ((match = mirrorPattern.exec(html)) !== null) {
+      let mirror = match[1];
+      // Remove trailing slash
+      if (mirror.endsWith("/")) {
+        mirror = mirror.slice(0, -1);
+      }
+      mirrors.add(mirror);
+    }
+
+    const mirrorList = Array.from(mirrors);
+
+    if (mirrorList.length > 0) {
+      console.log(`Found ${mirrorList.length} mirrors from sci-hub.shop:`, mirrorList);
+
+      // Combine with fallback mirrors for redundancy
+      const fallbackMirrors = getFallbackMirrors();
+      const allMirrors = [...new Set([...mirrorList, ...fallbackMirrors])];
+
+      console.log(`Total ${allMirrors.length} mirrors to try`);
+      return allMirrors;
+    } else {
+      console.log("No mirrors found on sci-hub.shop, using fallback");
+      return getFallbackMirrors();
+    }
+  } catch (error) {
+    console.log(`Failed to fetch from sci-hub.shop:`, error instanceof Error ? error.message : String(error));
+    return getFallbackMirrors();
+  }
 }
 
 function getFallbackMirrors(): string[] {
