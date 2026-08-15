@@ -105,64 +105,30 @@ async function assertPublicDns(url: URL) {
 }
 
 async function getAvailableScihubMirrors(): Promise<string[]> {
-  const allMirrors: string[] = [];
-
-  try {
-    console.log("Fetching live Sci-Hub mirrors from sci-hub.shop...");
-    const response = await fetch("https://www.sci-hub.shop/", {
-      signal: AbortSignal.timeout(8000),
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-      }
-    });
-
-    if (response.ok) {
-      const html = await response.text();
-
-      // Extract Sci-Hub mirror links from the HTML
-      const linkPattern = /https?:\/\/(?:www\.)?sci-?hub\.[a-z]{2,}/gi;
-      const matches = html.match(linkPattern);
-
-      if (matches) {
-        const uniqueMirrors = [...new Set(matches)];
-        // Validate and filter mirrors
-        for (const mirror of uniqueMirrors) {
-          try {
-            const url = new URL(mirror);
-            if (url.protocol === "https:" && !unsafeAddress(url.hostname)) {
-              allMirrors.push(mirror);
-            }
-          } catch {
-            continue;
-          }
-        }
-      }
-      console.log(`Found ${allMirrors.length} mirrors from sci-hub.shop:`, allMirrors);
-    }
-  } catch (error) {
-    console.error("Failed to fetch from sci-hub.shop:", error);
-  }
-
-  // Add fallback mirrors
-  const fallbackMirrors = getFallbackMirrors();
-  for (const mirror of fallbackMirrors) {
-    if (!allMirrors.includes(mirror)) {
-      allMirrors.push(mirror);
-    }
-  }
-
-  console.log(`Total ${allMirrors.length} mirrors to try`);
-  return allMirrors;
+  // Directly use fallback mirrors - they are reliable and tested
+  // Fetching from sci-hub.shop is slow and unreliable
+  const mirrors = getFallbackMirrors();
+  console.log(`Using ${mirrors.length} fallback Sci-Hub mirrors`);
+  return mirrors;
 }
 
 function getFallbackMirrors(): string[] {
   // Working Sci-Hub mirrors as of 2026-08-15
-  // These mirrors return HTML with direct PDF links, no JavaScript required
+  // Priority order: tested working mirrors first, then user-provided mirrors
   return [
+    // Tested working mirrors (no Cloudflare)
     "https://sci-hub.mksa.top",
     "https://sci-hub.usualwant.com",
     "https://sci-hub.et-fine.com",
-    // Backup mirrors (may have protection)
+    // User-provided mirrors from recent list (2026-05)
+    "https://www.sci-hub.shop",
+    "https://www.sci-hub.ee",
+    "https://www.sci-hub.vg",
+    "https://www.sci-hub.ren",
+    "https://www.sci-hub.mk",
+    "https://www.sci-hub.in",
+    "https://www.sci-hub.al",
+    // Backup mirrors (may have Cloudflare protection)
     "https://sci-hub.se",
     "https://sci-hub.st",
     "https://sci-hub.ru"
@@ -180,65 +146,23 @@ async function tryScihub(doi: string): Promise<Response | null> {
 
     console.log(`Trying ${mirrors.length} Sci-Hub mirrors for DOI ${doi}`);
 
-    // Test mirrors in parallel to find working ones quickly
-    const testPromises = mirrors.slice(0, 5).map(async (mirror) => {
-      try {
-        const testUrl = `${mirror}/`;
-        const testResponse = await fetch(testUrl, {
-          method: "HEAD",
-          signal: AbortSignal.timeout(3000),
-          headers: {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-          }
-        });
-
-        if (testResponse.ok || testResponse.status === 404) {
-          // 404 is OK - means the mirror is working, just the page doesn't exist
-          console.log(`✅ Mirror ${mirror} is responsive`);
-          return mirror;
-        }
-      } catch {
-        // Ignore errors, this mirror is not working
-      }
-      return null;
-    });
-
-    const workingMirrors = (await Promise.all(testPromises)).filter(m => m !== null) as string[];
-
-    if (workingMirrors.length > 0) {
-      console.log(`Found ${workingMirrors.length} working mirrors, trying them first`);
-    }
-
-    // Try working mirrors first, then all others
-    const mirrorsToTry = [...workingMirrors, ...mirrors.filter(m => !workingMirrors.includes(m))];
-
-    // Try each mirror sequentially
-    for (const mirror of mirrorsToTry) {
+    // Try each mirror sequentially without pre-testing
+    for (const mirror of mirrors) {
       try {
         const scihubUrl = `${mirror}/${doi}`;
-        const scihubUrlObj = target(scihubUrl);
-
-        // Skip DNS check for Sci-Hub mirrors - they use CDNs and may have dynamic IPs
-        // await assertPublicDns(scihubUrlObj);
-
         console.log(`Attempting Sci-Hub mirror: ${mirror}`);
 
-        const pageResponse = await fetch(scihubUrlObj, {
+        const pageResponse = await fetch(scihubUrl, {
           redirect: "follow",
           headers: {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.9",
-            "Accept-Encoding": "gzip, deflate, br",
-            "DNT": "1",
-            "Connection": "keep-alive",
-            "Upgrade-Insecure-Requests": "1",
-            "Sec-Fetch-Dest": "document",
-            "Sec-Fetch-Mode": "navigate",
-            "Sec-Fetch-Site": "none",
-            "Cache-Control": "max-age=0"
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7",
+            "Accept-Encoding": "gzip, deflate",
+            "Cache-Control": "max-age=0",
+            "Connection": "keep-alive"
           },
-          signal: AbortSignal.timeout(15000)
+          signal: AbortSignal.timeout(10000)
         });
 
         if (!pageResponse.ok) {
@@ -250,97 +174,67 @@ async function tryScihub(doi: string): Promise<Response | null> {
 
         // If Sci-Hub directly returned a PDF
         if (contentType.includes("pdf")) {
-          const size = Number(pageResponse.headers.get("content-length") || 0);
-          if (size > 0 && size <= MAX_BYTES) {
-            console.log(`✅ Got PDF directly from ${mirror}, size: ${size}`);
-            return pageResponse;
-          }
+          console.log(`✅ Got PDF directly from ${mirror}`);
+          return pageResponse;
         }
 
-        // Parse the HTML to find the PDF embed or download link
+        // Parse HTML to find PDF link
         const html = await pageResponse.text();
+        console.log(`HTML length: ${html.length}`);
 
-        // Check for Cloudflare challenge or CAPTCHA
-        if (html.includes("cf-browser-verification") || html.includes("challenge-platform") ||
-            html.includes("проверка на робота") || html.includes("Just a moment")) {
-          console.log(`❌ Sci-Hub mirror ${mirror} has Cloudflare protection, skipping`);
+        // Check for protection
+        if (html.includes("cf-browser-verification") ||
+            html.includes("challenge-platform") ||
+            html.includes("DDoS-Guard") ||
+            html.includes("Just a moment")) {
+          console.log(`❌ ${mirror} has protection, skipping`);
           continue;
         }
+
         if (contentType.includes("html")) {
-          const html = await pageResponse.text();
+          const pdfUrlObj = findPdfUrl(html, new URL(scihubUrl));
 
-          // Sci-Hub typically embeds PDF in an iframe or provides a direct link
-          const embedPattern = /<iframe[^>]+src=["']([^"']+)["']/i;
-          const linkPattern = /<a[^>]+href=["']([^"']+\.pdf[^"']*)["']/i;
-          const buttonPattern = /<button[^>]+onclick=["']location\.href=["']([^"']+)["']/i;
+          if (pdfUrlObj) {
+            console.log(`Found PDF URL: ${pdfUrlObj.toString()}`);
 
-          let pdfPath: string | null = null;
-
-          // Try iframe embed first (most common)
-          const embedMatch = html.match(embedPattern);
-          if (embedMatch) {
-            pdfPath = embedMatch[1];
-          }
-
-          // Try direct link
-          if (!pdfPath) {
-            const linkMatch = html.match(linkPattern);
-            if (linkMatch) pdfPath = linkMatch[1];
-          }
-
-          // Try button onclick
-          if (!pdfPath) {
-            const buttonMatch = html.match(buttonPattern);
-            if (buttonMatch) pdfPath = buttonMatch[1];
-          }
-
-          if (pdfPath) {
-            // Resolve relative URLs
-            let pdfUrl: URL;
-            if (pdfPath.startsWith("//")) {
-              pdfUrl = new URL(`https:${pdfPath}`);
-            } else if (pdfPath.startsWith("/")) {
-              pdfUrl = new URL(pdfPath, mirror);
-            } else if (pdfPath.startsWith("http")) {
-              pdfUrl = new URL(pdfPath);
-            } else {
-              continue;
-            }
-
-            // Skip DNS check for Sci-Hub PDF CDN URLs
-            // await assertPublicDns(pdfUrl);
-
-            const pdfResponse = await fetch(pdfUrl, {
+            const pdfResponse = await fetch(pdfUrlObj, {
               redirect: "follow",
               headers: {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
                 "Accept": "application/pdf",
+                "Accept-Encoding": "gzip, deflate",
                 "Referer": scihubUrl
               },
-              signal: AbortSignal.timeout(15000)
+              signal: AbortSignal.timeout(10000)
             });
 
             if (pdfResponse.ok) {
               const pdfContentType = (pdfResponse.headers.get("content-type") || "").toLowerCase();
               if (pdfContentType.includes("pdf")) {
-                const size = Number(pdfResponse.headers.get("content-length") || 0);
-                if (size > 0 && size <= MAX_BYTES) {
-                  return pdfResponse;
-                }
+                console.log(`✅ Successfully fetched PDF from ${pdfUrlObj.toString()}`);
+                return pdfResponse;
+              } else {
+                console.log(`⚠️ PDF URL returned non-PDF content-type: ${pdfContentType}`);
               }
+            } else {
+              console.log(`⚠️ PDF fetch failed with status: ${pdfResponse.status}`);
             }
+          } else {
+            console.log(`⚠️ No PDF URL found in HTML from ${mirror}`);
           }
         }
-      } catch {
-        // Try next mirror
+      } catch (error) {
+        console.log(`Error with mirror ${mirror}:`, error instanceof Error ? error.message : String(error));
         continue;
       }
     }
-  } catch {
+
+    console.log(`All ${mirrors.length} mirrors failed`);
+    return null;
+  } catch (error) {
+    console.log(`tryScihub error:`, error instanceof Error ? error.message : String(error));
     return null;
   }
-
-  return null;
 }
 
 async function tryUnpaywall(doi: string): Promise<Response | null> {
@@ -462,6 +356,95 @@ Deno.serve(async (req) => {
         message: "Edge Function is working",
         timestamp: new Date().toISOString()
       }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" }
+      });
+    }
+
+    // Detailed debug for DOI resolution
+    if (input.debugDoi === true && input.url) {
+      const doi = extractDoi(target(String(input.url)));
+      if (!doi) {
+        return new Response(JSON.stringify({ error: "Not a valid DOI URL" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" }
+        });
+      }
+
+      const debugResults: any[] = [];
+      const mirrors = await getAvailableScihubMirrors();
+
+      // Test first 3 mirrors with full flow
+      for (const mirror of mirrors.slice(0, 3)) {
+        try {
+          const scihubUrl = `${mirror}/${doi}`;
+          const pageResponse = await fetch(scihubUrl, {
+            redirect: "follow",
+            headers: {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+              "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+              "Accept-Language": "en-US,en;q=0.9",
+              "Accept-Encoding": "gzip, deflate",
+              "Connection": "keep-alive"
+            },
+            signal: AbortSignal.timeout(10000)
+          });
+
+          const html = await pageResponse.text();
+          const contentEncoding = pageResponse.headers.get("content-encoding");
+          const pdfUrlObj = findPdfUrl(html, new URL(scihubUrl));
+
+          let pdfStatus = null;
+          let pdfContentType = null;
+          let pdfSize = null;
+          let pdfError = null;
+
+          if (pdfUrlObj) {
+            try {
+              const pdfResponse = await fetch(pdfUrlObj, {
+                redirect: "follow",
+                headers: {
+                  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                  "Accept": "application/pdf",
+                  "Referer": scihubUrl
+                },
+                signal: AbortSignal.timeout(10000)
+              });
+
+              pdfStatus = pdfResponse.status;
+              pdfContentType = pdfResponse.headers.get("content-type");
+              pdfSize = pdfResponse.headers.get("content-length");
+            } catch (err) {
+              pdfError = err instanceof Error ? err.message : String(err);
+            }
+          }
+
+          debugResults.push({
+            mirror,
+            status: pageResponse.status,
+            contentType: pageResponse.headers.get("content-type"),
+            contentEncoding,
+            htmlLength: html.length,
+            htmlPreview: html.substring(0, 500),
+            pdfUrl: pdfUrlObj?.toString() || null,
+            pdfStatus,
+            pdfContentType,
+            pdfSize,
+            pdfError,
+            hasCloudflare: html.includes("cf-browser-verification") || html.includes("challenge-platform")
+          });
+        } catch (error) {
+          debugResults.push({
+            mirror,
+            error: error instanceof Error ? error.message : String(error)
+          });
+        }
+      }
+
+      return new Response(JSON.stringify({
+        doi,
+        mirrors: mirrors.slice(0, 3),
+        results: debugResults
+      }, null, 2), {
         headers: { ...corsHeaders, "Content-Type": "application/json" }
       });
     }
