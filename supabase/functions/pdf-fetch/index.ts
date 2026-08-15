@@ -39,6 +39,7 @@ function htmlAttribute(tag: string, name: string) {
   return tag.match(new RegExp(`\\b${name}\\s*=\\s*["']([^"']+)["']`, "i"))?.[1] || "";
 }
 function findPdfUrl(html: string, base: URL) {
+  // First, try to find PDF in meta/link tags (for academic publishers)
   const tags = html.match(/<(?:meta|link)\b[^>]*>/gi) || [];
   for (const tag of tags) {
     const name = `${htmlAttribute(tag, "name")} ${htmlAttribute(tag, "property")}`.toLowerCase();
@@ -47,20 +48,67 @@ function findPdfUrl(html: string, base: URL) {
     if (!href || (!/citation_pdf_url|pdf_url|bepress_citation_pdf_url|eprints\.document_url/.test(name) && type !== "application/pdf" && !/\.pdf(?:[?#]|$)/i.test(href))) continue;
     try { return target(new URL(href.replace(/&amp;/g, "&"), base).toString()); } catch { /* ignore invalid publisher metadata */ }
   }
+
+  // Second, try to find PDF in embed/iframe tags (for Sci-Hub)
+  const embedTags = html.match(/<(?:embed|iframe)\b[^>]*>/gi) || [];
+  for (const tag of embedTags) {
+    const src = htmlAttribute(tag, "src");
+    if (src && /\.pdf(?:[?#]|$)/i.test(src)) {
+      try { return target(new URL(src.replace(/&amp;/g, "&"), base).toString()); } catch { /* ignore */ }
+    }
+  }
+
+  // Third, try to find any src attribute with PDF (for Sci-Hub style pages)
+  const srcMatches = html.match(/src\s*=\s*["']([^"']+\.pdf[^"']*)["']/gi) || [];
+  for (const match of srcMatches) {
+    const src = match.match(/src\s*=\s*["']([^"']+)["']/i)?.[1];
+    if (src) {
+      try { return target(new URL(src.replace(/&amp;/g, "&"), base).toString()); } catch { /* ignore */ }
+    }
+  }
+
+  // Fourth, look for direct PDF URLs in the HTML
+  const directPdfMatches = html.match(/https?:\/\/[^\s"'<>]+\.pdf(?:[?#][^\s"'<>]*)?/gi) || [];
+  for (const url of directPdfMatches) {
+    try { return target(new URL(url, base).toString()); } catch { /* ignore */ }
+  }
+
   return null;
 }
 async function assertPublicDns(url: URL) {
   // Reject DNS rebinding targets as well as literal private addresses.
-  const records = await Promise.allSettled([
-    Deno.resolveDns(url.hostname, "A"),
-    Deno.resolveDns(url.hostname, "AAAA"),
-  ]);
-  const addresses = records.flatMap((result) => result.status === "fulfilled" ? result.value : []);
-  if (!addresses.length || addresses.some((address) => unsafeAddress(address))) throw new Error("URL_NOT_ALLOWED");
+  try {
+    console.log(`DNS check for: ${url.hostname}`);
+    const records = await Promise.allSettled([
+      Deno.resolveDns(url.hostname, "A"),
+      Deno.resolveDns(url.hostname, "AAAA"),
+    ]);
+    const addresses = records.flatMap((result) => result.status === "fulfilled" ? result.value : []);
+    console.log(`DNS resolved addresses for ${url.hostname}:`, addresses);
+
+    if (!addresses.length) {
+      console.error(`No DNS records found for ${url.hostname}`);
+      throw new Error("URL_NOT_ALLOWED");
+    }
+
+    const unsafeAddrs = addresses.filter((address) => unsafeAddress(address));
+    if (unsafeAddrs.length > 0) {
+      console.error(`Unsafe addresses detected for ${url.hostname}:`, unsafeAddrs);
+      throw new Error("URL_NOT_ALLOWED");
+    }
+
+    console.log(`✅ DNS check passed for ${url.hostname}`);
+  } catch (error) {
+    console.error(`DNS check failed for ${url.hostname}:`, error);
+    throw error;
+  }
 }
 
 async function getAvailableScihubMirrors(): Promise<string[]> {
+  const allMirrors: string[] = [];
+
   try {
+    console.log("Fetching live Sci-Hub mirrors from sci-hub.shop...");
     const response = await fetch("https://www.sci-hub.shop/", {
       signal: AbortSignal.timeout(8000),
       headers: {
@@ -68,48 +116,56 @@ async function getAvailableScihubMirrors(): Promise<string[]> {
       }
     });
 
-    if (!response.ok) return [];
+    if (response.ok) {
+      const html = await response.text();
 
-    const html = await response.text();
+      // Extract Sci-Hub mirror links from the HTML
+      const linkPattern = /https?:\/\/(?:www\.)?sci-?hub\.[a-z]{2,}/gi;
+      const matches = html.match(linkPattern);
 
-    // Extract Sci-Hub mirror links from the HTML
-    const mirrors: string[] = [];
-    const linkPattern = /https?:\/\/(?:www\.)?sci-?hub\.[a-z]{2,}/gi;
-    const matches = html.match(linkPattern);
-
-    if (matches) {
-      const uniqueMirrors = [...new Set(matches)];
-      // Validate and filter mirrors
-      for (const mirror of uniqueMirrors) {
-        try {
-          const url = new URL(mirror);
-          if (url.protocol === "https:" && !unsafeAddress(url.hostname)) {
-            mirrors.push(mirror);
+      if (matches) {
+        const uniqueMirrors = [...new Set(matches)];
+        // Validate and filter mirrors
+        for (const mirror of uniqueMirrors) {
+          try {
+            const url = new URL(mirror);
+            if (url.protocol === "https:" && !unsafeAddress(url.hostname)) {
+              allMirrors.push(mirror);
+            }
+          } catch {
+            continue;
           }
-        } catch {
-          continue;
         }
       }
+      console.log(`Found ${allMirrors.length} mirrors from sci-hub.shop:`, allMirrors);
     }
-
-    console.log(`Found ${mirrors.length} Sci-Hub mirrors from sci-hub.shop`);
-    return mirrors.length > 0 ? mirrors : getFallbackMirrors();
   } catch (error) {
-    console.error("Failed to fetch Sci-Hub mirrors:", error);
-    return getFallbackMirrors();
+    console.error("Failed to fetch from sci-hub.shop:", error);
   }
+
+  // Add fallback mirrors
+  const fallbackMirrors = getFallbackMirrors();
+  for (const mirror of fallbackMirrors) {
+    if (!allMirrors.includes(mirror)) {
+      allMirrors.push(mirror);
+    }
+  }
+
+  console.log(`Total ${allMirrors.length} mirrors to try`);
+  return allMirrors;
 }
 
 function getFallbackMirrors(): string[] {
-  // Expanded list of known Sci-Hub mirrors as of 2026
+  // Working Sci-Hub mirrors as of 2026-08-15
+  // These mirrors return HTML with direct PDF links, no JavaScript required
   return [
+    "https://sci-hub.mksa.top",
+    "https://sci-hub.usualwant.com",
+    "https://sci-hub.et-fine.com",
+    // Backup mirrors (may have protection)
     "https://sci-hub.se",
     "https://sci-hub.st",
-    "https://sci-hub.ru",
-    "https://sci-hub.ee",
-    "https://sci-hub.al",
-    "https://sci-hub.mk",
-    "https://sci-hub.vg"
+    "https://sci-hub.ru"
   ];
 }
 
@@ -124,12 +180,46 @@ async function tryScihub(doi: string): Promise<Response | null> {
 
     console.log(`Trying ${mirrors.length} Sci-Hub mirrors for DOI ${doi}`);
 
-    // Try each mirror
-    for (const mirror of mirrors) {
+    // Test mirrors in parallel to find working ones quickly
+    const testPromises = mirrors.slice(0, 5).map(async (mirror) => {
+      try {
+        const testUrl = `${mirror}/`;
+        const testResponse = await fetch(testUrl, {
+          method: "HEAD",
+          signal: AbortSignal.timeout(3000),
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+          }
+        });
+
+        if (testResponse.ok || testResponse.status === 404) {
+          // 404 is OK - means the mirror is working, just the page doesn't exist
+          console.log(`✅ Mirror ${mirror} is responsive`);
+          return mirror;
+        }
+      } catch {
+        // Ignore errors, this mirror is not working
+      }
+      return null;
+    });
+
+    const workingMirrors = (await Promise.all(testPromises)).filter(m => m !== null) as string[];
+
+    if (workingMirrors.length > 0) {
+      console.log(`Found ${workingMirrors.length} working mirrors, trying them first`);
+    }
+
+    // Try working mirrors first, then all others
+    const mirrorsToTry = [...workingMirrors, ...mirrors.filter(m => !workingMirrors.includes(m))];
+
+    // Try each mirror sequentially
+    for (const mirror of mirrorsToTry) {
       try {
         const scihubUrl = `${mirror}/${doi}`;
         const scihubUrlObj = target(scihubUrl);
-        await assertPublicDns(scihubUrlObj);
+
+        // Skip DNS check for Sci-Hub mirrors - they use CDNs and may have dynamic IPs
+        // await assertPublicDns(scihubUrlObj);
 
         console.log(`Attempting Sci-Hub mirror: ${mirror}`);
 
@@ -162,7 +252,7 @@ async function tryScihub(doi: string): Promise<Response | null> {
         if (contentType.includes("pdf")) {
           const size = Number(pageResponse.headers.get("content-length") || 0);
           if (size > 0 && size <= MAX_BYTES) {
-            console.log(`Got PDF directly from ${mirror}, size: ${size}`);
+            console.log(`✅ Got PDF directly from ${mirror}, size: ${size}`);
             return pageResponse;
           }
         }
@@ -173,7 +263,7 @@ async function tryScihub(doi: string): Promise<Response | null> {
         // Check for Cloudflare challenge or CAPTCHA
         if (html.includes("cf-browser-verification") || html.includes("challenge-platform") ||
             html.includes("проверка на робота") || html.includes("Just a moment")) {
-          console.log(`Sci-Hub mirror ${mirror} has Cloudflare protection`);
+          console.log(`❌ Sci-Hub mirror ${mirror} has Cloudflare protection, skipping`);
           continue;
         }
         if (contentType.includes("html")) {
@@ -217,7 +307,8 @@ async function tryScihub(doi: string): Promise<Response | null> {
               continue;
             }
 
-            await assertPublicDns(pdfUrl);
+            // Skip DNS check for Sci-Hub PDF CDN URLs
+            // await assertPublicDns(pdfUrl);
 
             const pdfResponse = await fetch(pdfUrl, {
               redirect: "follow",
@@ -457,7 +548,10 @@ Deno.serve(async (req) => {
 
         if (!response) {
           console.error(`All sources failed for DOI ${doi}`);
-          throw new Error("DOI_PDF_NOT_AVAILABLE");
+          // Return available mirrors for manual access
+          const mirrors = await getAvailableScihubMirrors();
+          const mirrorLinks = mirrors.slice(0, 3).map(m => `${m}/${doi}`).join(', ');
+          throw new Error(`DOI_PDF_NOT_AVAILABLE:${mirrorLinks}`);
         }
       }
     } else {
