@@ -1706,6 +1706,20 @@ function App() {
   function normalizePaperUrl(value: string) {
     const trimmed = value.trim();
     if (/^10\.\d{4,9}\/[\S]+$/i.test(trimmed)) return `https://doi.org/${trimmed}`;
+
+    // Normalize ArXiv URLs: convert /abs/ to /pdf/
+    try {
+      const url = new URL(trimmed);
+      if (url.hostname === 'arxiv.org' && url.pathname.includes('/abs/')) {
+        const arxivId = url.pathname.match(/\/abs\/(.+)/)?.[1];
+        if (arxivId) {
+          return `https://arxiv.org/pdf/${arxivId}`;
+        }
+      }
+    } catch {
+      // Not a valid URL, return as-is
+    }
+
     return trimmed;
   }
   function isDoiLink(url: URL) { return ["doi.org", "dx.doi.org"].includes(url.hostname.toLowerCase()) && /^\/10\.\d{4,9}\//i.test(url.pathname); }
