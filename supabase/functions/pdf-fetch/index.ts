@@ -113,25 +113,21 @@ async function getAvailableScihubMirrors(): Promise<string[]> {
 }
 
 function getFallbackMirrors(): string[] {
-  // Working Sci-Hub mirrors as of 2026-08-15
-  // Priority order: tested working mirrors first, then user-provided mirrors
+  // Working Sci-Hub mirrors from parallel test (2026-08-15)
+  // Sorted by response time (fastest first)
   return [
-    // Tested working mirrors (no Cloudflare)
-    "https://sci-hub.mksa.top",
-    "https://sci-hub.usualwant.com",
-    "https://sci-hub.et-fine.com",
-    // User-provided mirrors from recent list (2026-05)
-    "https://www.sci-hub.shop",
-    "https://www.sci-hub.ee",
-    "https://www.sci-hub.vg",
-    "https://www.sci-hub.ren",
+    // Top 5 fastest mirrors
+    "http://sci-hub.mk",
+    "https://sci-hub.al",
     "https://www.sci-hub.mk",
-    "https://www.sci-hub.in",
-    "https://www.sci-hub.al",
-    // Backup mirrors (may have Cloudflare protection)
-    "https://sci-hub.se",
-    "https://sci-hub.st",
-    "https://sci-hub.ru"
+    "https://www.sci-hub.ee",
+    "https://sci-hub.vg",
+    // Additional working mirrors
+    "http://sci-hub.vg",
+    "https://sci-hub.mk",
+    "http://sci-hub.al",
+    "https://www.sci-hub.vg",
+    "https://www.sci-hub.al"
   ];
 }
 
@@ -360,6 +356,55 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Test Sci-Hub directly
+    if (input.testScihub === true && input.url) {
+      const doi = extractDoi(target(String(input.url)));
+      if (!doi) {
+        return new Response(JSON.stringify({ error: "Not a valid DOI URL" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" }
+        });
+      }
+
+      console.log(`Testing Sci-Hub for DOI: ${doi}`);
+
+      try {
+        const response = await tryScihub(doi);
+
+        if (!response) {
+          return new Response(JSON.stringify({
+            error: "tryScihub returned null",
+            doi
+          }), {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          });
+        }
+
+        console.log(`Got response from tryScihub: status=${response.status}, type=${response.headers.get("content-type")}`);
+
+        // Return the PDF directly
+        return new Response(response.body, {
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "application/pdf",
+            "Content-Length": response.headers.get("content-length") || "",
+            "X-Debug": "direct-from-tryScihub"
+          }
+        });
+
+      } catch (error) {
+        return new Response(JSON.stringify({
+          error: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : undefined,
+          doi
+        }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" }
+        });
+      }
+    }
+
     // Detailed debug for DOI resolution
     if (input.debugDoi === true && input.url) {
       const doi = extractDoi(target(String(input.url)));
@@ -480,53 +525,37 @@ Deno.serve(async (req) => {
 
     // Try publisher first for DOI URLs
     if (resolveDoi && doi) {
-      try {
-        for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects += 1) {
-          await assertPublicDns(current);
-          response = await fetch(current, { redirect: "manual", headers: { Accept: "text/html,application/pdf;q=0.9" } });
-          if (![301, 302, 303, 307, 308].includes(response.status)) break;
-          const location = response.headers.get("location");
-          if (!location || redirects === MAX_REDIRECTS) throw new Error("TOO_MANY_REDIRECTS");
-          current = target(new URL(location, current).toString());
-        }
+      console.log(`DOI resolution mode for: ${doi}`);
 
-        if (!response?.ok) {
-          publisherFailed = true;
-        } else if (!(response.headers.get("content-type") || "").toLowerCase().includes("pdf")) {
-          if (Number(response.headers.get("content-length") || 0) > 2 * 1024 * 1024) throw new Error("DOI_PAGE_TOO_LARGE");
-          const html = await response.text();
-          const pdfUrl = findPdfUrl(html, current);
-          if (!pdfUrl) {
-            publisherFailed = true;
-          } else {
-            current = pdfUrl;
-            for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects += 1) {
-              await assertPublicDns(current);
-              response = await fetch(current, { redirect: "manual", headers: { Accept: "application/pdf" } });
-              if (![301, 302, 303, 307, 308].includes(response.status)) break;
-              const location = response.headers.get("location");
-              if (!location || redirects === MAX_REDIRECTS) throw new Error("TOO_MANY_REDIRECTS");
-              current = target(new URL(location, current).toString());
-            }
-            if (!response?.ok) publisherFailed = true;
-          }
-        }
-      } catch (error) {
-        publisherFailed = true;
-      }
+      // Skip publisher attempt for now - go straight to alternative sources
+      console.log(`Skipping publisher, trying alternative sources directly...`);
+      publisherFailed = true;
 
       // If publisher failed, try alternative sources
       if (publisherFailed) {
         console.log(`Publisher failed for DOI ${doi}, trying alternative sources...`);
 
         // Try Unpaywall first (legal open access)
-        response = await tryUnpaywall(doi);
-        console.log(`Unpaywall result: ${response ? 'found' : 'not found'}`);
+        try {
+          response = await tryUnpaywall(doi);
+          console.log(`Unpaywall result: ${response ? 'found' : 'not found'}`);
+        } catch (error) {
+          console.error(`Unpaywall error:`, error);
+          response = undefined;
+        }
 
         // If Unpaywall didn't work, try Sci-Hub mirrors
         if (!response) {
-          response = await tryScihub(doi);
-          console.log(`Sci-Hub result: ${response ? 'found' : 'not found'}`);
+          try {
+            response = await tryScihub(doi);
+            console.log(`Sci-Hub result: ${response ? 'found' : 'not found'}`);
+            if (response) {
+              console.log(`Sci-Hub response status: ${response.status}, type: ${response.headers.get('content-type')}`);
+            }
+          } catch (error) {
+            console.error(`Sci-Hub error:`, error);
+            response = undefined;
+          }
         }
 
         if (!response) {
@@ -536,6 +565,8 @@ Deno.serve(async (req) => {
           const mirrorLinks = mirrors.slice(0, 3).map(m => `${m}/${doi}`).join(', ');
           throw new Error(`DOI_PDF_NOT_AVAILABLE:${mirrorLinks}`);
         }
+
+        console.log(`✅ Got response from alternative source, status: ${response.status}`);
       }
     } else {
       // Non-DOI URL: standard fetch
@@ -562,13 +593,47 @@ Deno.serve(async (req) => {
       }
       console.log(`Successfully fetched PDF, size: ${response.headers.get("content-length")} bytes`);
     }
+
+    // Ensure we have a valid response
+    if (!response) {
+      console.error(`No response available after all attempts`);
+      throw new Error("PDF_URL_FETCH_FAILED");
+    }
+
+    console.log(`Validating response: status=${response.status}, type=${response.headers.get("content-type")}`);
+
+    // Validate response
     const size = Number(response.headers.get("content-length") || 0);
     const type = response.headers.get("content-type") || "";
+
     if (size > MAX_BYTES) throw new Error("PDF_TOO_LARGE");
     if (type && !type.toLowerCase().includes("pdf")) throw new Error("NOT_A_PDF");
+
+    // For DOI resolution, stream the response directly without reading the full body
+    // This avoids timeout issues with large PDFs
+    if (resolveDoi) {
+      console.log(`Streaming PDF response, size: ${size} bytes`);
+      return new Response(response.body, {
+        headers: {
+          ...corsHeaders,
+          "Content-Type": "application/pdf",
+          "Content-Length": response.headers.get("content-length") || "",
+          "Content-Disposition": response.headers.get("content-disposition") || ""
+        }
+      });
+    }
+
+    // For direct PDF URLs, validate the PDF header
     const bytes = new Uint8Array(await response.arrayBuffer());
     if (bytes.byteLength > MAX_BYTES || String.fromCharCode(...bytes.slice(0, 4)) !== "%PDF") throw new Error("NOT_A_PDF");
-    return new Response(bytes, { headers: { ...corsHeaders, "Content-Type": "application/pdf", "Content-Length": String(bytes.byteLength), "Content-Disposition": response.headers.get("content-disposition") || "" } });
+    return new Response(bytes, {
+      headers: {
+        ...corsHeaders,
+        "Content-Type": "application/pdf",
+        "Content-Length": String(bytes.byteLength),
+        "Content-Disposition": response.headers.get("content-disposition") || ""
+      }
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "PDF_URL_FETCH_FAILED";
     console.error(`pdf-fetch error: ${message}`, error);
