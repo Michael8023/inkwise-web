@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PDF 导入调试工具</title>
+  <style>
+    body { font-family: monospace; max-width: 1200px; margin: 20px auto; padding: 20px; background: #1e1e1e; color: #d4d4d4; }
+    h1 { color: #4ec9b0; }
+    .test-section { background: #252526; padding: 15px; margin: 15px 0; border-left: 3px solid #007acc; }
+    button { background: #0e639c; color: white; border: none; padding: 10px 20px; cursor: pointer; margin: 5px; }
+    button:hover { background: #1177bb; }
+    .result { background: #1e1e1e; padding: 10px; margin: 10px 0; border: 1px solid #3c3c3c; max-height: 300px; overflow: auto; }
+    .error { border-color: #f48771; }
+    .success { border-color: #89d185; }
+    input { width: 100%; padding: 8px; background: #3c3c3c; border: 1px solid #555; color: #d4d4d4; margin: 10px 0; }
+    .info { color: #4fc1ff; }
+    .warn { color: #dcdcaa; }
+    .error-text { color: #f48771; }
+    .success-text { color: #89d185; }
+  </style>
+</head>
+<body>
+  <h1>🔍 PDF 导入调试工具</h1>
+
+  <div class="test-section">
+    <h3>1. 检查 Supabase 配置</h3>
+    <button onclick="checkConfig()">检查配置</button>
+    <div id="config-result" class="result" style="display:none;"></div>
+  </div>
+
+  <div class="test-section">
+    <h3>2. 检查用户登录状态</h3>
+    <button onclick="checkAuth()">检查登录</button>
+    <button onclick="login()">测试登录</button>
+    <div id="auth-result" class="result" style="display:none;"></div>
+  </div>
+
+  <div class="test-section">
+    <h3>3. 测试 PDF Fetch API</h3>
+    <input type="text" id="test-url" value="https://arxiv.org/abs/1706.03762" placeholder="输入 PDF URL">
+    <button onclick="testPdfFetch()">测试获取</button>
+    <button onclick="testPdfFetch('https://doi.org/10.1016/j.coms.2007.07.008', true)">测试 DOI</button>
+    <div id="fetch-result" class="result" style="display:none;"></div>
+  </div>
+
+  <div class="test-section">
+    <h3>4. 测试直接获取（CORS）</h3>
+    <button onclick="testDirectFetch()">测试直接获取 ArXiv</button>
+    <div id="cors-result" class="result" style="display:none;"></div>
+  </div>
+
+  <script type="module">
+    import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+    const supabaseUrl = 'https://znkrejbcjysnqopytdui.supabase.co';
+    const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpua3JlamJjanlzbnFvcHl0ZHVpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY1OTM4NTIsImV4cCI6MjEwMjE2OTg1Mn0.yM_cSbiHi3SvAhXt6X_DSJvmKECax5QY0SLAUwgvyAM';
+
+    window.supabase = createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true,
+      }
+    });
+
+    window.checkConfig = async function() {
+      const result = document.getElementById('config-result');
+      result.style.display = 'block';
+      result.innerHTML = `
+        <div class="info">Supabase URL: ${supabaseUrl}</div>
+        <div class="info">Anon Key: ${supabaseAnonKey.substring(0, 50)}...</div>
+        <div class="success-text">✓ 配置正常</div>
+      `;
+    };
+
+    window.checkAuth = async function() {
+      const result = document.getElementById('auth-result');
+      result.style.display = 'block';
+      result.innerHTML = '<div class="info">⏳ 检查中...</div>';
+
+      try {
+        const { data, error } = await window.supabase.auth.getSession();
+
+        if (error) {
+          result.innerHTML = `<div class="error-text">❌ 错误: ${error.message}</div>`;
+          return;
+        }
+
+        if (data.session) {
+          result.innerHTML = `
+            <div class="success-text">✓ 已登录</div>
+            <div class="info">用户 ID: ${data.session.user.id}</div>
+            <div class="info">邮箱: ${data.session.user.email || '无'}</div>
+            <div class="info">Access Token (前50字符): ${data.session.access_token.substring(0, 50)}...</div>
+            <div class="info">过期时间: ${new Date(data.session.expires_at * 1000).toLocaleString()}</div>
+          `;
+        } else {
+          result.innerHTML = '<div class="warn">⚠ 未登录（使用 anon key）</div>';
+        }
+      } catch (err) {
+        result.innerHTML = `<div class="error-text">❌ 异常: ${err.message}</div>`;
+      }
+    };
+
+    window.login = function() {
+      alert('请在实际网站登录后，刷新此调试页面');
+    };
+
+    window.testPdfFetch = async function(customUrl = null, isDoiTest = false) {
+      const result = document.getElementById('fetch-result');
+      result.style.display = 'block';
+      result.className = 'result';
+
+      const url = customUrl || document.getElementById('test-url').value;
+      result.innerHTML = `<div class="info">⏳ 测试 URL: ${url}</div>`;
+
+      try {
+        const { data, error } = await window.supabase.auth.getSession();
+
+        let authToken = supabaseAnonKey;
+        if (data.session) {
+          authToken = data.session.access_token;
+          result.innerHTML += `<div class="info">使用 access token: ${authToken.substring(0, 30)}...</div>`;
+        } else {
+          result.innerHTML += `<div class="warn">⚠ 未登录，使用 anon key</div>`;
+        }
+
+        const body = isDoiTest
+          ? JSON.stringify({ url, resolveDoi: true })
+          : JSON.stringify({ url });
+
+        result.innerHTML += `<div class="info">请求体: ${body}</div>`;
+
+        const response = await fetch(`${supabaseUrl}/functions/v1/pdf-fetch`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': supabaseAnonKey,
+            'Authorization': `Bearer ${authToken}`
+          },
+          body
+        });
+
+        result.innerHTML += `<div class="info">HTTP Status: ${response.status}</div>`;
+        result.innerHTML += `<div class="info">Content-Type: ${response.headers.get('content-type')}</div>`;
+
+        if (response.ok) {
+          const contentLength = response.headers.get('content-length');
+          result.className = 'result success';
+          result.innerHTML += `<div class="success-text">✓ 成功获取 PDF</div>`;
+          result.innerHTML += `<div class="info">大小: ${(contentLength / 1024 / 1024).toFixed(2)} MB</div>`;
+        } else {
+          result.className = 'result error';
+          const errorData = await response.json().catch(() => ({}));
+          result.innerHTML += `<div class="error-text">❌ 失败: ${errorData.error || '未知错误'}</div>`;
+          result.innerHTML += `<div class="error-text">详细: ${JSON.stringify(errorData, null, 2)}</div>`;
+        }
+      } catch (err) {
+        result.className = 'result error';
+        result.innerHTML += `<div class="error-text">❌ 异常: ${err.message}</div>`;
+        result.innerHTML += `<div class="error-text">堆栈: ${err.stack}</div>`;
+      }
+    };
+
+    window.testDirectFetch = async function() {
+      const result = document.getElementById('cors-result');
+      result.style.display = 'block';
+      result.innerHTML = '<div class="info">⏳ 测试直接获取...</div>';
+
+      try {
+        const response = await fetch('https://arxiv.org/pdf/1706.03762.pdf', {
+          method: 'HEAD'
+        });
+
+        if (response.ok) {
+          result.className = 'result success';
+          result.innerHTML = `
+            <div class="success-text">✓ 可以直接获取（无 CORS 限制）</div>
+            <div class="info">不需要代理</div>
+          `;
+        } else {
+          result.className = 'result error';
+          result.innerHTML = `<div class="error-text">❌ HTTP ${response.status}</div>`;
+        }
+      } catch (err) {
+        if (err.message.includes('CORS')) {
+          result.className = 'result warn';
+          result.innerHTML = `
+            <div class="warn">⚠ CORS 限制（需要代理）</div>
+            <div class="info">${err.message}</div>
+          `;
+        } else {
+          result.className = 'result error';
+          result.innerHTML = `<div class="error-text">❌ ${err.message}</div>`;
+        }
+      }
+    };
+
+    // 自动检查配置和登录状态
+    window.addEventListener('load', () => {
+      checkConfig();
+      checkAuth();
+    });
+  </script>
+</body>
+</html>

@@ -18,6 +18,15 @@ function unsafeAddress(host: string) {
 function target(value: string) {
   const url = new URL(value);
   if (!["http:", "https:"].includes(url.protocol) || unsafeAddress(url.hostname)) throw new Error("URL_NOT_ALLOWED");
+
+  // Normalize ArXiv URLs: convert /abs/ to /pdf/ (without .pdf extension)
+  if (url.hostname === "arxiv.org" && url.pathname.includes("/abs/")) {
+    const arxivId = url.pathname.match(/\/abs\/(.+)/)?.[1];
+    if (arxivId) {
+      url.pathname = `/pdf/${arxivId}`;
+    }
+  }
+
   return url;
 }
 function isDoiUrl(url: URL) { return DOI_HOSTS.has(url.hostname.toLowerCase()) && /^\/10\.\d{4,9}\//i.test(url.pathname); }
@@ -316,11 +325,26 @@ Deno.serve(async (req) => {
   const p = preflight(req); if (p) return p;
   try {
     if (req.method !== "POST") throw new Error("METHOD_NOT_ALLOWED");
-    const account = await user(req);
-    await rateLimit(account.id, "pdf_fetch", 8);
     const input = await body(req);
-    let current = target(String(input.url || ""));
     const resolveDoi = input.resolveDoi === true;
+
+    // For DOI resolution, require authentication
+    if (resolveDoi) {
+      const account = await user(req);
+      await rateLimit(account.id, "pdf_fetch", 8);
+    } else {
+      // For regular PDF URLs, try to get user but allow anonymous access
+      try {
+        const account = await user(req);
+        await rateLimit(account.id, "pdf_fetch", 8);
+      } catch {
+        // Anonymous user - use IP-based rate limiting
+        const clientIp = req.headers.get("x-forwarded-for")?.split(",")[0] || req.headers.get("x-real-ip") || "anonymous";
+        await rateLimit(clientIp, "pdf_fetch", 5);
+      }
+    }
+
+    let current = target(String(input.url || ""));
     if (resolveDoi && !isDoiUrl(current)) throw new Error("DOI_NOT_ALLOWED");
 
     const doi = extractDoi(current);
@@ -378,15 +402,28 @@ Deno.serve(async (req) => {
       }
     } else {
       // Non-DOI URL: standard fetch
+      console.log(`Fetching PDF from: ${current}`);
       for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects += 1) {
-        await assertPublicDns(current);
+        try {
+          await assertPublicDns(current);
+        } catch (dnsError) {
+          console.error(`DNS check failed for ${current}:`, dnsError);
+          throw dnsError;
+        }
+        console.log(`Attempt ${redirects + 1}: fetching ${current}`);
         response = await fetch(current, { redirect: "manual", headers: { Accept: "application/pdf" } });
+        console.log(`Response status: ${response.status}, content-type: ${response.headers.get("content-type")}`);
         if (![301, 302, 303, 307, 308].includes(response.status)) break;
         const location = response.headers.get("location");
         if (!location || redirects === MAX_REDIRECTS) throw new Error("TOO_MANY_REDIRECTS");
         current = target(new URL(location, current).toString());
+        console.log(`Redirected to: ${current}`);
       }
-      if (!response?.ok) throw new Error(`PDF_UPSTREAM_${response?.status || 502}`);
+      if (!response?.ok) {
+        console.error(`PDF fetch failed: status=${response?.status}, url=${current}`);
+        throw new Error(`PDF_UPSTREAM_${response?.status || 502}`);
+      }
+      console.log(`Successfully fetched PDF, size: ${response.headers.get("content-length")} bytes`);
     }
     const size = Number(response.headers.get("content-length") || 0);
     const type = response.headers.get("content-type") || "";
@@ -397,7 +434,8 @@ Deno.serve(async (req) => {
     return new Response(bytes, { headers: { ...corsHeaders, "Content-Type": "application/pdf", "Content-Length": String(bytes.byteLength), "Content-Disposition": response.headers.get("content-disposition") || "" } });
   } catch (error) {
     const message = error instanceof Error ? error.message : "PDF_URL_FETCH_FAILED";
+    console.error(`pdf-fetch error: ${message}`, error);
     const status = message === "AUTH_REQUIRED" ? 401 : message === "RATE_LIMITED" ? 429 : 400;
-    return new Response(JSON.stringify({ error: message }), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({ error: message, details: error instanceof Error ? error.stack : undefined }), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 });
