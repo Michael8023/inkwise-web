@@ -335,6 +335,9 @@ const apiErrors: Record<string, string> = {
   PDF_UPSTREAM_401: "该论文需要订阅权限，无法自动获取。请通过机构访问或手动下载后导入。",
   PDF_UPSTREAM_403: "该论文访问受限，无法自动获取。请通过机构访问或手动下载后导入。",
   PDF_IMPORT_TOO_LARGE: "该 PDF 超过 128 MB，暂时无法通过链接导入。",
+  SESSION_EXPIRED: "您的登录已过期，请重新登录后再试。",
+  DOI_RESOLVE_FAILED: "DOI 解析失败，请检查链接是否正确。",
+  PDF_URL_FETCH_FAILED: "PDF 获取失败，请检查链接或稍后重试。",
 };
 function readableApiError(error: unknown, fallback: string) { const code=error instanceof Error?error.message:String(error||""); return apiErrors[code]||fallback; }
 
@@ -1722,7 +1725,12 @@ function App() {
         });
         if (!response.ok) {
           const result = await response.json().catch(() => ({}));
-          throw new Error(result.error || "DOI_RESOLVE_FAILED");
+          const errorCode = result.error || "DOI_RESOLVE_FAILED";
+          // Handle authentication errors specifically
+          if (errorCode === "AUTH_REQUIRED" || response.status === 401) {
+            throw new Error("SESSION_EXPIRED");
+          }
+          throw new Error(errorCode);
         }
       } else {
         try {
@@ -1740,7 +1748,12 @@ function App() {
           });
           if (!response.ok) {
             const result = await response.json().catch(() => ({}));
-            throw new Error(result.error || "PDF_URL_FETCH_FAILED");
+            const errorCode = result.error || "PDF_URL_FETCH_FAILED";
+            // Handle authentication errors specifically
+            if (errorCode === "AUTH_REQUIRED" || response.status === 401) {
+              throw new Error("SESSION_EXPIRED");
+            }
+            throw new Error(errorCode);
           }
         }
       }
