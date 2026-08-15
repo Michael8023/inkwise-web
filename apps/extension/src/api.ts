@@ -23,13 +23,12 @@ export async function functionRequest(
   if (!supabaseConfigured) throw new Error("SUPABASE_NOT_CONFIGURED");
   const { data, error: sessionError } = await supabase.auth.getSession();
 
-  if (sessionError || !data.session) {
-    throw new Error("AUTH_REQUIRED");
-  }
-
   const headers = new Headers(init.headers);
   headers.set("apikey", supabaseAnonKey);
-  headers.set("Authorization", `Bearer ${data.session.access_token}`);
+  headers.set(
+    "Authorization",
+    `Bearer ${data.session?.access_token || supabaseAnonKey}`,
+  );
 
   try {
     const response = await fetch(`${supabaseUrl}/functions/v1/${functionName}`, {
@@ -38,7 +37,7 @@ export async function functionRequest(
     });
 
     // If we get 401, try refreshing the session and retry once
-    if (response.status === 401) {
+    if (response.status === 401 && data.session) {
       const { data: refreshed, error: refreshError } = await supabase.auth.refreshSession();
 
       if (!refreshError && refreshed.session) {
@@ -48,9 +47,6 @@ export async function functionRequest(
           headers,
         });
       }
-
-      // If refresh fails, throw AUTH_REQUIRED
-      throw new Error("AUTH_REQUIRED");
     }
 
     return response;
