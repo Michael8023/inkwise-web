@@ -1731,7 +1731,7 @@ function App() {
     try {
       let response: Response;
       if (isDoiLink(parsed)) {
-        if (!session) throw new Error("解析 DOI 需登录后通过安全代理访问出版商页面。");
+        // DOI links now work for both logged-in and anonymous users
         response = await functionRequest("pdf-fetch", {
           method: "POST",
           headers: { "Content-Type": "application/json" },

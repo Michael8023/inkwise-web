@@ -328,20 +328,23 @@ Deno.serve(async (req) => {
     const input = await body(req);
     const resolveDoi = input.resolveDoi === true;
 
-    // For DOI resolution, require authentication
-    if (resolveDoi) {
+    // Try to get user, but allow anonymous access with stricter rate limits
+    let userId: string | null = null;
+    try {
       const account = await user(req);
-      await rateLimit(account.id, "pdf_fetch", 8);
+      userId = account.id;
+    } catch {
+      // Anonymous user
+      userId = null;
+    }
+
+    if (userId) {
+      // Logged-in user: normal rate limits
+      await rateLimit(userId, "pdf_fetch", resolveDoi ? 5 : 8);
     } else {
-      // For regular PDF URLs, try to get user but allow anonymous access
-      try {
-        const account = await user(req);
-        await rateLimit(account.id, "pdf_fetch", 8);
-      } catch {
-        // Anonymous user - use IP-based rate limiting
-        const clientIp = req.headers.get("x-forwarded-for")?.split(",")[0] || req.headers.get("x-real-ip") || "anonymous";
-        await rateLimit(clientIp, "pdf_fetch", 5);
-      }
+      // Anonymous user: stricter rate limits
+      const clientIp = req.headers.get("x-forwarded-for")?.split(",")[0] || req.headers.get("x-real-ip") || "anonymous";
+      await rateLimit(clientIp, "pdf_fetch", resolveDoi ? 2 : 5);
     }
 
     let current = target(String(input.url || ""));
