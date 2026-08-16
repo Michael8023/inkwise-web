@@ -165,7 +165,7 @@ button {
 .url-import-submit:hover:not(:disabled) { filter: brightness(1.07); transform: translateY(-1px); }
 .url-import-submit:disabled { cursor: wait; opacity: .68; }
 .url-import-help { margin: -4px 0 0; color: #718693; font-size: 11px; line-height: 1.5; }
-.account-dialog { gap: 20px; }
+.account-dialog { width: min(510px, calc(100vw - 32px)); gap: 18px; padding: 28px; }
 .account-dialog > .auth-brand { margin-bottom: 2px; }
 .account-hero { display: flex; align-items: center; gap: 13px; }
 .account-avatar { width: 52px; height: 52px; display: grid; place-items: center; border-radius: 15px; background: linear-gradient(145deg, var(--brand-600), var(--accent)); color: #fff; font-size: 22px; font-weight: 750; box-shadow: 0 10px 20px rgba(90,58,171,.24); }
@@ -185,8 +185,7 @@ button {
 .quota-summary strong { color: var(--text); font-size: 14px; }
 .account-signout { min-height: 40px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid color-mix(in srgb, var(--danger) 24%, var(--border)); border-radius: 9px; background: transparent; color: var(--danger); padding: 8px; cursor: pointer; }
 .account-signout:hover { background: color-mix(in srgb, var(--danger) 8%, transparent); }
-.account-library { min-height: 42px; display: flex; align-items: center; gap: 8px; border: 1px solid color-mix(in srgb, var(--accent) 36%, var(--border)); border-radius: 9px; background: color-mix(in srgb, var(--accent-soft) 72%, var(--surface)); color: var(--accent); padding: 9px 11px; font-size: 12px; font-weight: 750; cursor: pointer; }
-.account-library:hover { background: var(--accent-soft); }.account-library svg:last-child { margin-left: auto; }
+.account-library { min-height: 106px; display: flex; align-items: center; gap: 13px; border: 1px solid color-mix(in srgb, var(--accent) 48%, var(--border)); border-radius: 13px; background: linear-gradient(120deg, color-mix(in srgb, var(--accent-soft) 82%, var(--surface)), color-mix(in srgb, var(--accent) 10%, var(--surface))); color: var(--accent); padding: 15px; text-align: left; cursor: pointer; box-shadow: 0 10px 24px color-mix(in srgb, var(--accent) 12%, transparent); transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease; }.account-library:hover { border-color: var(--accent); box-shadow: 0 14px 30px color-mix(in srgb, var(--accent) 20%, transparent); transform: translateY(-2px); }.account-library-icon { display: grid; place-items: center; width: 53px; height: 53px; flex: 0 0 auto; border-radius: 14px; background: linear-gradient(145deg, var(--brand-700), var(--accent)); color: #fff; box-shadow: 0 8px 17px color-mix(in srgb, var(--accent) 34%, transparent); }.account-library-copy { min-width: 0; display: grid; gap: 3px; }.account-library-copy small { color: var(--accent); font-size: 10px; font-weight: 800; letter-spacing: .11em; }.account-library-copy strong { color: var(--text); font-size: 15px; }.account-library-copy em { overflow: hidden; color: var(--text-secondary); font-size: 11px; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }.account-library > svg:last-child { margin-left: auto; flex: 0 0 auto; }
 .quota-badge { margin-left: 6px; color: var(--accent); font-size: 11px; font-weight: 600; }
 .filename {
   min-width: 0;
@@ -212,6 +211,7 @@ button {
   color: var(--accent);
   box-shadow: 0 3px 10px color-mix(in srgb, var(--accent) 15%, transparent);
 }
+.account-trigger { min-height: 34px; display: inline-flex; align-items: center; gap: 7px; border: 1px solid color-mix(in srgb, var(--accent) 36%, var(--border)); border-radius: 8px; background: color-mix(in srgb, var(--accent-soft) 65%, var(--surface)); color: var(--accent); padding: 0 10px; font-size: 12px; font-weight: 750; cursor: pointer; transition: background .16s ease, border-color .16s ease, transform .16s ease; }.account-trigger:hover { border-color: var(--accent); background: var(--accent-soft); transform: translateY(-1px); }.account-trigger svg { flex: 0 0 auto; }
 .open-button,
 .drop-zone button,
 .panel-empty button {
@@ -554,6 +554,7 @@ button {
 .admin-table-wrap td:first-child strong, .admin-table-wrap td:first-child span { display: block; }
 .admin-table-wrap td:first-child strong { color: #202c28; font-size: 12px; }
 .admin-table-wrap td:first-child span { margin-top: 3px; color: #8a9692; font-size: 10px; }
+.admin-library-usage { display: grid; gap: 3px; }.admin-library-usage strong { color: #2a5e55; font-size: 12px; }.admin-library-usage span { color: #86948f; font-size: 10px; }
 .plan-pill { display: inline-flex; border-radius: 4px; background: #e9f4f0; color: #28795f; padding: 4px 7px; font-size: 9px; }
 .credit-number { color: #1e2d28; font-size: 13px; }
 .admin-table-wrap i { color: #9c655f; font-size: 10px; font-style: normal; text-transform: uppercase; }
@@ -568,6 +569,7 @@ button {
 .admin-drawer-backdrop { position: fixed; z-index: 80; inset: 0; display: flex; justify-content: flex-end; background: rgb(10 16 14 / .36); backdrop-filter: blur(2px); }
 .admin-drawer { width: min(460px, 100%); height: 100%; overflow-y: auto; position: relative; background: #fff; padding: 28px; box-shadow: -18px 0 55px rgb(16 31 25 / .18); }
 .admin-close { position: absolute; top: 20px; right: 20px; display: grid; place-items: center; border: 0; background: transparent; color: #82908b; cursor: pointer; }
+.drawer-library-usage { display: flex; align-items: center; gap: 11px; margin-top: 12px; border: 1px solid #d5e7e0; border-radius: 8px; background: #f5fbf8; color: #33856c; padding: 13px; }.drawer-library-usage span { display: grid; gap: 3px; color: #6b817a; font-size: 11px; }.drawer-library-usage strong { color: #244d41; font-size: 13px; }
 .drawer-user { display: flex; align-items: center; gap: 12px; padding-right: 28px; }
 .drawer-user > div { width: 47px; height: 47px; display: grid; place-items: center; border-radius: 7px; background: #18382e; color: #89d5b9; font-size: 19px; font-weight: 750; }
 .drawer-user h2 { margin: 0; font-size: 18px; }
@@ -1466,9 +1468,7 @@ body.is-resizing-panel * {
   .topbar-center {
     display: none;
   }
-  .topbar-right .icon-button:first-of-type {
-    display: none;
-  }
+  .account-trigger { min-height: 32px; padding: 0 8px; }
   .workspace.panel-open,
   .workspace.rail-open.panel-open,
   .workspace.rail-open {
@@ -1492,3 +1492,11 @@ body.is-resizing-panel * {
     width: min(380px, calc(100vw - 24px));
   }
 }
+
+/* Global reader notifications sit below the fixed toolbar and stack safely. */
+.notification-stack { position: fixed; z-index: 200; top: calc(var(--topbar-h) + 12px); left: 16px; display: grid; gap: 8px; width: min(390px, calc(100vw - 32px)); pointer-events: none; }
+.notification-toast { display: flex; align-items: flex-start; gap: 9px; width: 100%; border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border)); border-radius: 10px; background: color-mix(in srgb, var(--surface) 95%, var(--accent-soft)); box-shadow: 0 12px 28px rgb(6 52 119 / .16); color: var(--text-secondary); padding: 11px 12px; text-align: left; font-size: 12px; line-height: 1.45; cursor: pointer; pointer-events: auto; backdrop-filter: blur(14px); animation: notification-enter .28s cubic-bezier(.22,.61,.36,1) both; }
+.notification-toast > svg:first-child { flex: 0 0 auto; margin-top: 1px; color: var(--accent); }.notification-toast span { flex: 1; }.notification-toast .notification-close { flex: 0 0 auto; margin-top: 1px; color: var(--text-muted); }.notification-toast.success { border-color: color-mix(in srgb, #299970 38%, var(--border)); }.notification-toast.success > svg:first-child { color: #187456; }.notification-toast.error { border-color: color-mix(in srgb, var(--danger) 38%, var(--border)); }.notification-toast.error > svg:first-child { color: var(--danger); }.notification-toast.leaving { animation: notification-leave .18s ease-in both; pointer-events: none; }
+@keyframes notification-enter { from { opacity: 0; transform: translateX(-18px) scale(.96); } to { opacity: 1; transform: translateX(0) scale(1); } }
+@keyframes notification-leave { to { opacity: 0; transform: translateX(-12px) scale(.96); } }
+@media (max-width: 720px) { .notification-stack { top: calc(var(--topbar-h) + 8px); left: 10px; width: calc(100vw - 20px); } }

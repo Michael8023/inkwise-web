@@ -36,6 +36,7 @@ import {
   Link,
   UserRound,
   ScanLine,
+  Crop,
   ScanSearch,
   Image as ImageIcon,
   Table2,
@@ -97,6 +98,7 @@ type OutlineItem = { title: string; dest?: unknown; pageNumber?: number; items?:
 type ChatMessage = { role: "user" | "assistant"; content: string };
 type AuthSession = { user: { id: string; email?: string; user_metadata?: Record<string, unknown> } };
 type Usage = { plan: string; creditsRemaining: number; periodEnd: string | null };
+type AppNotice = { id: string; message: string; tone: "success" | "error" | "info"; leaving?: boolean };
 const PUBLIC_READER_ORIGIN = "https://www.inkwise.site";
 const MAX_PDF_IMPORT_BYTES = 128 * 1024 * 1024;
 const MAX_LIBRARY_PDF_BYTES = 50 * 1024 * 1024;
@@ -405,7 +407,7 @@ function AccountDialog({ session, usage, onClose, onSignOut, onOpenLibrary }: { 
     <div className="account-hero"><div className="account-avatar">{initial}</div><div><p>账户中心</p><h2>{displayName}</h2><span>{session.user.email}</span></div></div>
     <section className="account-credits"><div><span>可用 AI 额度</span><strong>{creditAmount}<small> 分</small></strong></div><div className="credit-orbit"><Sparkles size={19} /></div></section>
     <div className="quota-summary"><span>当前套餐<strong>{usage?.plan ? usage.plan.toUpperCase() : "FREE"}</strong></span><span>结算日期<strong>{usage?.periodEnd ? new Date(usage.periodEnd).toLocaleDateString("zh-CN", { month: "short", day: "numeric" }) : "每月"}</strong></span></div>
-    <button type="button" className="account-library" onClick={onOpenLibrary}><FolderOpen size={16} />打开文献工作台<ChevronRight size={16} /></button>
+    <button type="button" className="account-library" onClick={onOpenLibrary}><span className="account-library-icon"><FolderOpen size={22}/></span><span className="account-library-copy"><small>个人文献工作台</small><strong>整理每一篇重要文献</strong><em>查看文献库、继续阅读与管理资料</em></span><ChevronRight size={19} /></button>
     <button type="button" className="account-signout" onClick={onSignOut}><LogOut size={15} />退出登录</button>
   </section></div>;
 }
@@ -414,11 +416,10 @@ function UrlImportDialog({ value, error, loading, onChange, onClose, onSubmit }:
   return <div className="auth-backdrop url-import-backdrop"><form className="auth-dialog url-import-dialog" onSubmit={event => { event.preventDefault(); onSubmit(); }}>
     <button type="button" className="popover-close" onClick={onClose} aria-label="关闭导入窗口"><X size={16} /></button>
     <div className="url-import-icon"><Link size={20} /></div>
-    <div className="url-import-heading"><span>SHIDEA / IMPORT</span><h2>导入论文链接</h2><p>支持公开 PDF 链接、doi.org 链接或纯 DOI；我们会尝试导入出版商或开放资源提供的 PDF。</p></div>
+    <div className="url-import-heading"><span>SHIDEA / IMPORT</span><h2>导入论文链接</h2><p>支持公开 PDF 链接、doi.org 链接或纯 DOI。</p></div>
     <label className="url-import-field">PDF 或 DOI<input type="text" required autoFocus placeholder="https://doi.org/10.xxxx/... 或 10.xxxx/..." value={value} onChange={event => onChange(event.target.value)} /></label>
     {error && <p className="url-import-error">{error}</p>}
     <button className="url-import-submit" type="submit" disabled={loading}>{loading ? "正在导入…" : "在当前页面打开"}<ChevronRight size={17} /></button>
-    <p className="url-import-help">DOI 解析会先尝试出版商官方渠道，再查询 Unpaywall 等开放获取资源，最后尝试 Sci-Hub 实时镜像。</p>
   </form></div>;
 }
 
@@ -445,13 +446,13 @@ function ExtensionAutoOpenToggle() {
   }}><span className="extension-auto-open-track" aria-hidden="true"><span className="extension-auto-open-thumb"><img src="/brand/shidea-mark.png" alt="" /></span></span></button>;
 }
 
-function NativePdfToolbar({ page, total, onPage, onZoom, onFullscreen }: { page: string; total: number; onPage: (page: number) => void; onZoom: (delta: number) => void; onFullscreen: () => void }) {
+function NativePdfToolbar({ page, total, onPage, onZoom, onFullscreen, onDownload }: { page: string; total: number; onPage: (page: number) => void; onZoom: (delta: number) => void; onFullscreen: () => void; onDownload: () => void }) {
   const [value, setValue] = useState(page);
   useEffect(() => setValue(page), [page]);
   return <header className="native-pdf-toolbar" aria-label="PDF 工具栏">
     <div className="native-toolbar-group native-toolbar-left"><button title="切换边栏"><PanelLeft size={20} /></button><i /><button title="绘制"><Highlighter size={20} /></button><button className="native-draw-label">绘制<ChevronDown size={14} /></button><i /><button title="橡皮擦"><X size={19} /></button><button title="朗读"><MessageSquare size={20} /></button></div>
     <form className="native-toolbar-center" onSubmit={event => { event.preventDefault(); onPage(Number(value)); }}><button type="button" title="缩小" onClick={() => onZoom(-.1)}><Minus size={19} /></button><button type="button" title="放大" onClick={() => onZoom(.1)}><Plus size={19} /></button><i /><input aria-label="页码" inputMode="numeric" value={value} onChange={event => setValue(event.target.value.replace(/\D/g, ""))} onBlur={() => setValue(page)} /><span>/ {total}</span><i /><button type="button" title="旋转"><RefreshCw size={19} /></button><button type="button" title="适应页面"><Maximize size={18} /></button></form>
-    <div className="native-toolbar-group native-toolbar-right"><button title="搜索"><Search size={20} /></button><i /><button title="打印"><FileText size={19} /></button><button title="下载"><Download size={19} /></button><i /><button title="全屏" onClick={onFullscreen}><Maximize size={20} /></button><button title="设置"><SlidersHorizontal size={20} /></button></div>
+    <div className="native-toolbar-group native-toolbar-right"><button title="搜索"><Search size={20} /></button><i /><button title="打印"><FileText size={19} /></button><button title="下载 PDF" onClick={onDownload}><Download size={19} /></button><i /><button title="全屏" onClick={onFullscreen}><Maximize size={20} /></button><button title="设置"><SlidersHorizontal size={20} /></button></div>
   </header>;
 }
 
@@ -476,6 +477,14 @@ function IconButton({
       {children}
     </button>
   );
+}
+
+function NoticeStack({ notices, onDismiss }: { notices: AppNotice[]; onDismiss: (id: string) => void }) {
+  return <aside className="notification-stack" aria-live="polite" aria-atomic="false">
+    {notices.map(notice => <button key={notice.id} className={`notification-toast ${notice.tone}${notice.leaving ? " leaving" : ""}`} onClick={() => onDismiss(notice.id)}>
+      {notice.tone === "success" ? <Check size={16}/> : notice.tone === "error" ? <X size={16}/> : <Sparkles size={16}/>}<span>{notice.message}</span><X className="notification-close" size={14}/>
+    </button>)}
+  </aside>;
 }
 
 function WelcomeScreen({
@@ -1292,14 +1301,12 @@ function App() {
   const [mineruRegions, setMineruRegions] = useState<VisualRegion[]>([]);
   const [mineruReady, setMineruReady] = useState(false);
   const [layoutState, setLayoutState] = useState<LayoutState>({ state: "idle" });
-  const [layoutNoticeVisible, setLayoutNoticeVisible] = useState(false);
   const pdfBytes = useRef<ArrayBuffer | null>(null);
   const importSourceUrl = useRef<string | null>(null);
   const libraryHydrating = useRef(false);
   const librarySaveAttempted = useRef("");
   const autoLayoutDocument = useRef("");
   const fileInput = useRef<HTMLInputElement>(null);
-  const readerFileInput = useRef<HTMLInputElement>(null);
   const [documentId, setDocumentId] = useState("");
   const [documentText, setDocumentText] = useState("");
   const [documentReady, setDocumentReady] = useState(false);
@@ -1324,7 +1331,7 @@ function App() {
   const [currentPaperId, setCurrentPaperId] = useState("");
   const [paperStateLoaded, setPaperStateLoaded] = useState(true);
   const [libraryOpen, setLibraryOpen] = useState(false);
-  const [libraryNotice, setLibraryNotice] = useState("");
+  const [notices, setNotices] = useState<AppNotice[]>([]);
   const [usage, setUsage] = useState<Usage | null>(null);
   const [authOpen, setAuthOpen] = useState(false);
   const [authMode, setAuthMode] = useState<"login" | "register">("login");
@@ -1476,10 +1483,8 @@ function App() {
     return () => window.clearTimeout(timer);
   }, [pdf]);
   useEffect(() => {
-    if (layoutState.state !== "done" && layoutState.state !== "error") return;
-    setLayoutNoticeVisible(true);
-    const timer = window.setTimeout(() => setLayoutNoticeVisible(false), 3800);
-    return () => window.clearTimeout(timer);
+    if (layoutState.state === "done" && layoutState.message) showNotice(layoutState.message, "success");
+    if (layoutState.state === "error" && layoutState.message) showNotice(layoutState.message, "error");
   }, [layoutState.state]);
   useEffect(() => {
     const onMove = (event: MouseEvent) => {
@@ -1505,10 +1510,19 @@ function App() {
       if (response.ok) setUsage(await response.json());
     } catch { setUsage(null); }
   }
+  function dismissNotice(id: string) {
+    setNotices(items => items.map(item => item.id === id ? { ...item, leaving: true } : item));
+    window.setTimeout(() => setNotices(items => items.filter(item => item.id !== id)), 180);
+  }
+  function showNotice(message: string, tone: AppNotice["tone"] = "info") {
+    const id = crypto.randomUUID();
+    setNotices(items => [...items, { id, message, tone }]);
+    window.setTimeout(() => dismissNotice(id), 1820);
+  }
   async function archiveCurrentDocument() {
     if (!session || !pdf || !pdfBytes.current) return;
     if (pdfBytes.current.byteLength > MAX_LIBRARY_PDF_BYTES) {
-      setLibraryNotice("该 PDF 超过 Supabase Free 的 50 MB 上限，已在本次阅读中打开，但未保存到文献库。");
+      showNotice("该 PDF 超过 Supabase Free 的 50 MB 上限，已在本次阅读中打开，但未保存到文献库。", "info");
       return;
     }
     try {
@@ -1553,9 +1567,9 @@ function App() {
         throw insertError;
       }
       setCurrentPaperId(id);
-      setLibraryNotice("已安全保存到你的文献库。");
+      showNotice("已安全保存到你的文献库。", "success");
     } catch (error) {
-      setLibraryNotice(`文献库保存失败：${readableApiError(error, "请稍后重试。")}`);
+      showNotice(`文献库保存失败：${readableApiError(error, "请稍后重试。")}`, "error");
     }
   }
   function hydrateLibraryState(saved: Awaited<ReturnType<typeof loadPaperState>>) {
@@ -1591,12 +1605,11 @@ function App() {
     const { error } = await supabase.from("library_paper_states").upsert({
       paper_id: currentPaperId, user_id: session.user.id, reader_state: readerState, layout_result: layoutResult, updated_at: new Date().toISOString(),
     });
-    if (error) setLibraryNotice("阅读记录同步失败，将在下次修改时重试。");
+    if (error) showNotice("阅读记录同步失败，将在下次修改时重试。", "error");
     else await supabase.from("library_papers").update({ last_opened_at: new Date().toISOString() }).eq("id", currentPaperId);
   }
   async function openLibraryPaper(paper: LibraryPaper) {
     try {
-      setLibraryNotice("");
       setPdfOpening(true);
       const { data, error } = await supabase.storage.from("library-pdfs").createSignedUrl(paper.storage_path, 300);
       if (error || !data?.signedUrl) throw error || new Error("LIBRARY_URL_FAILED");
@@ -1609,7 +1622,7 @@ function App() {
       await supabase.from("library_papers").update({ last_opened_at: new Date().toISOString() }).eq("id", paper.id);
     } catch {
       setPdfOpening(false);
-      setLibraryNotice("无法打开这篇文献，请稍后重试。");
+      showNotice("无法打开这篇文献，请稍后重试。", "error");
     }
   }
   async function submitAuth() {
@@ -1692,7 +1705,7 @@ function App() {
     setCurrentPaperId(options.paperId || "");
     setPaperStateLoaded(!options.paperId);
     importSourceUrl.current = options.sourceUrl || null;
-    setSelections([]); setHighlights([]); setVisualSelections([]); setVisualMode(false); setMineruRegions([]); setMineruReady(false); setDocumentTitle(""); setLayoutState({ state: "idle" }); setLayoutNoticeVisible(false); autoLayoutDocument.current = "";
+    setSelections([]); setHighlights([]); setVisualSelections([]); setVisualMode(false); setMineruRegions([]); setMineruReady(false); setDocumentTitle(""); setLayoutState({ state: "idle" }); autoLayoutDocument.current = "";
     setDocumentReady(false); setDocumentText(""); setPdf(null); setOutline([]);
     setFileName(name);
     setSummary({}); setSummaryOpen({ short: false, full: false });
@@ -1800,11 +1813,18 @@ function App() {
       }
     }, 250);
   }
+  function downloadPdf() {
+    if (!pdfBytes.current) { showNotice("当前 PDF 暂无法下载，请稍后重试。", "error"); return; }
+    const baseName = (documentTitle || fileName || "shidea-document").replace(/[\\/:*?"<>|]/g, "_");
+    const href = URL.createObjectURL(new Blob([pdfBytes.current], { type: "application/pdf" }));
+    const link = document.createElement("a");
+    link.href = href; link.download = /\.pdf$/i.test(baseName) ? baseName : `${baseName}.pdf`;
+    document.body.appendChild(link); link.click(); link.remove(); window.setTimeout(() => URL.revokeObjectURL(href), 0);
+  }
   async function runMineruLayout() {
     if (!pdf || !pdfBytes.current || layoutState.state === "preparing" || layoutState.state === "uploading" || layoutState.state === "processing" || layoutState.state === "downloading") return;
     try {
       const bytes = pdfBytes.current;
-      setLayoutNoticeVisible(false);
       setLayoutState({ state: "preparing", message: "正在优化您的阅读体验…", progress: 4 });
       const preparedResponse = await functionRequest("mineru-layout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "prepare", name: fileName || "document.pdf" }) });
       const prepared = await preparedResponse.json(); if (!preparedResponse.ok) throw new Error(prepared.error || "MINERU_PREPARE_FAILED");
@@ -2224,7 +2244,7 @@ function App() {
 
   if (nativePdfView) {
     return <div className="app quiet-reading native-pdf-mode">
-      <NativePdfToolbar page={pageInput} total={pdf.numPages} onPage={goToPage} onZoom={delta => setScale(value => Math.max(.6, Math.min(3, +(value + delta).toFixed(1))))} onFullscreen={toggleFullscreen} />
+      <NativePdfToolbar page={pageInput} total={pdf.numPages} onPage={goToPage} onZoom={delta => setScale(value => Math.max(.6, Math.min(3, +(value + delta).toFixed(1))))} onFullscreen={toggleFullscreen} onDownload={downloadPdf} />
       <main className="workspace native-pdf-workspace">
         <section className="viewer">
           <div className="document-scroll">
@@ -2310,8 +2330,8 @@ function App() {
                 <Plus size={16} />
               </IconButton>
             </div>
-            <IconButton label={visualMode ? "退出图表框选" : "框选图片或表格"} active={visualMode} onClick={() => { setVisualMode(value => !value); setSelections([]); }}>
-              <ScanLine size={17} />
+            <IconButton label={visualMode ? "退出图片/表格框选" : "框选图片或表格"} active={visualMode} onClick={() => { setVisualMode(value => !value); setSelections([]); }}>
+              <Crop size={19} strokeWidth={2.5} />
             </IconButton>
             <IconButton label="智能版面分析" onClick={runMineruLayout} active={layoutState.state === "processing"}>
               <ScanSearch size={17} />
@@ -2319,24 +2339,9 @@ function App() {
           </div>
         )}
         <div className="topbar-right">
-          <label className="open-button">
-            <FolderOpen size={16} />
-            打开 PDF
-            <input
-              ref={readerFileInput}
-              type="file"
-              accept="application/pdf"
-              onChange={(event) =>
-                event.target.files?.[0] && openFileInNewTab(event.target.files[0])
-              }
-            />
-          </label>
-          <IconButton label="通过 URL 打开 PDF" onClick={() => { setPaperUrl(""); setUrlError(""); setUrlOpen(true); }}>
-            <Link size={16} />
+          <IconButton label="下载 PDF" onClick={downloadPdf}>
+            <Download size={18} />
           </IconButton>
-          {session && <IconButton label="打开文献库" onClick={() => setLibraryOpen(true)}>
-            <FolderOpen size={17} />
-          </IconButton>}
           <IconButton label="切换全屏" onClick={toggleFullscreen}>
             <Maximize size={17} />
           </IconButton>
@@ -2355,9 +2360,9 @@ function App() {
           >
             <PanelRight size={18} />
           </IconButton>
-          <IconButton label={session ? "账户与额度" : "登录"} onClick={() => setAuthOpen(true)}>
-            {session ? <UserRound size={17} /> : <LogIn size={17} />}
-          </IconButton>
+          <button className="account-trigger" onClick={() => setAuthOpen(true)}>
+            {session ? <UserRound size={17} /> : <LogIn size={17} />}<span>{session ? "个人中心" : "登录"}</span>
+          </button>
         </div>
       </header>
       <main
@@ -2381,10 +2386,6 @@ function App() {
           )}
         </nav>
         <section className="viewer">
-          {layoutNoticeVisible && (layoutState.state === "done" || layoutState.state === "error") && <aside className={`layout-notice visible ${layoutState.state}`} aria-live="polite">
-            {layoutState.state === "done" ? <Check size={16} /> : <X size={16} />}
-            <span>{layoutState.message}</span>
-          </aside>}
           <div
             className="document-scroll"
             onWheel={(event) => {
@@ -2579,7 +2580,7 @@ function App() {
           </div>
         </aside>
       </main>
-      {libraryNotice && <button className="library-sync-notice" onClick={() => setLibraryNotice("")}>{libraryNotice}</button>}
+      <NoticeStack notices={notices} onDismiss={dismissNotice}/>
       {authOpen && (session ? <AccountDialog session={session} usage={usage} onClose={() => setAuthOpen(false)} onSignOut={() => { signOut(); setAuthOpen(false); }} onOpenLibrary={() => { setAuthOpen(false); setLibraryOpen(true); }} /> : <AuthDialog mode={authMode} email={authEmail} password={authPassword} name={authName} code={authCode} error={authError} notice={authNotice} verifying={authVerifying} onClose={() => setAuthOpen(false)} onSubmit={submitAuth} onVerify={verifyEmailCode} onResend={resendEmailCode} onModeChange={(nextMode) => { setAuthMode(nextMode); setAuthVerifying(false); setAuthError(""); setAuthNotice(""); }} onEmail={setAuthEmail} onPassword={setAuthPassword} onName={setAuthName} onCode={setAuthCode} />)}
       {urlOpen && <UrlImportDialog value={paperUrl} error={urlError} loading={urlLoading} onChange={value => { setPaperUrl(value); setUrlError(""); }} onClose={() => setUrlOpen(false)} onSubmit={openPdfUrl} />}
       {!embeddedReader && <ExtensionAutoOpenToggle />}
