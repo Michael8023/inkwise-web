@@ -412,6 +412,27 @@ const apiErrors: Record<string, string> = {
   PDF_URL_FETCH_FAILED: "PDF 获取失败，请检查链接或稍后重试。",
 };
 function readableApiError(error: unknown, fallback: string) { const code=error instanceof Error?error.message:String(error||""); return apiErrors[code]||fallback; }
+function sanitizeCloudText(value: string) {
+  let output = "";
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code === 0) continue;
+    if (code >= 0xD800 && code <= 0xDBFF) {
+      const next = value.charCodeAt(index + 1);
+      if (next >= 0xDC00 && next <= 0xDFFF) { output += value[index] + value[index + 1]; index += 1; }
+      else output += "\uFFFD";
+      continue;
+    }
+    output += code >= 0xDC00 && code <= 0xDFFF ? "\uFFFD" : value[index];
+  }
+  return output;
+}
+function sanitizeCloudValue(value: unknown): unknown {
+  if (typeof value === "string") return sanitizeCloudText(value);
+  if (Array.isArray(value)) return value.map(sanitizeCloudValue);
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, sanitizeCloudValue(item)]));
+  return value;
+}
 function librarySaveError(error: unknown, stage: "检查重复" | "上传 PDF" | "创建文献记录") {
   const message = error instanceof Error
     ? error.message
@@ -1664,14 +1685,14 @@ function App() {
       const { error: insertError } = await supabase.from("library_papers").insert({
         id,
         user_id: session.user.id,
-        title: title.slice(0, 500),
-        original_name: fileName || "document.pdf",
+        title: sanitizeCloudText(title).slice(0, 500),
+        original_name: sanitizeCloudText(fileName || "document.pdf"),
         source_url: importSourceUrl.current,
         storage_path: storagePath,
         content_hash: hash,
         file_size: bytes.byteLength,
         page_count: pdf.numPages,
-        document_text: documentText || null,
+        document_text: documentText ? sanitizeCloudText(documentText) : null,
       });
       if (insertError) {
         await supabase.storage.from("library-pdfs").remove([storagePath]);
@@ -1727,7 +1748,7 @@ function App() {
     };
     const layoutResult = mineruReady ? { ready: true, regions: mineruRegions, outline, documentTitle: documentTitle || null } : null;
     const { error } = await supabase.from("library_paper_states").upsert({
-      paper_id: currentPaperId, user_id: session.user.id, reader_state: readerState, layout_result: layoutResult, updated_at: new Date().toISOString(),
+      paper_id: currentPaperId, user_id: session.user.id, reader_state: sanitizeCloudValue(readerState), layout_result: sanitizeCloudValue(layoutResult), updated_at: new Date().toISOString(),
     });
     if (error) showNotice("阅读记录同步失败，将在下次修改时重试。", "error");
     else await supabase.from("library_papers").update({ last_opened_at: new Date().toISOString() }).eq("id", currentPaperId);
