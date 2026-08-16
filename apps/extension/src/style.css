@@ -432,13 +432,13 @@ button {
 }
 .art-highlight-initial {
   display: inline-block;
-  margin: 0 -1px -7px -1px;
+  margin: 0 -1px -5px 0;
   color: inherit;
   font-family: "Bodoni 72", Didot, Georgia, "Times New Roman", serif;
-  font-size: 37px;
-  font-style: normal;
+  font-size: 29px;
+  font-style: italic;
   font-weight: 700;
-  line-height: .76;
+  line-height: .86;
   text-shadow: 1px 1px 0 rgb(255 255 255 / .48);
 }
 .art-highlight strong { color: #057c80; font-style: normal; font-weight: 700; }
