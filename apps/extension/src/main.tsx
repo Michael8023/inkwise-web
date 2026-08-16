@@ -41,6 +41,7 @@ import {
   Image as ImageIcon,
   Table2,
   Download,
+  StickyNote,
 } from "lucide-react";
 import "./style.css";
 import { mountAdmin } from "./admin";
@@ -67,8 +68,10 @@ type Selection = {
   offsetY?: number;
   highlightColor?: string;
   task?: Task;
+  note?: string;
+  popoverClosed?: boolean;
 };
-type SavedHighlight = Omit<Selection, "task" | "offsetX" | "offsetY"> & { color: string };
+type SavedHighlight = Omit<Selection, "task" | "offsetX" | "offsetY" | "note" | "popoverClosed"> & { color: string };
 type VisualSelection = {
   id: string;
   pageNumber: number;
@@ -764,6 +767,7 @@ function SelectionPopover({
   onFollowup,
   onMove,
   onHighlight,
+  onNote,
 }: {
   selection: Selection;
   pageRef: React.RefObject<HTMLDivElement | null>;
@@ -772,6 +776,7 @@ function SelectionPopover({
   onFollowup: (selection: Selection, question: string) => void;
   onMove: (id: string, offsetX: number, offsetY: number) => void;
   onHighlight: (id: string, color: string) => void;
+  onNote: (selection: Selection) => void;
 }) {
   const popoverRef = useRef<HTMLDivElement>(null);
   const dragStart = useRef<{ x: number; y: number; offsetX: number; offsetY: number } | null>(null);
@@ -884,6 +889,7 @@ function SelectionPopover({
       <div className="popover-actions">
         <button onClick={() => onTask(selection, "translate")} disabled={selection.task?.state === "loading"}>译 翻译</button>
         <button onClick={() => onTask(selection, "explain")} disabled={selection.task?.state === "loading"}>✦ 解释</button>
+        <button onClick={() => onNote(selection)}><StickyNote size={14} /> 笔记</button>
       </div>
       <div className="highlight-palette">
         {["#f4cf4d", "#a7df91", "#8cc8ff", "#f5a6bd"].map((color) => <button key={color} className={selection.highlightColor === color ? "active" : ""} style={{ backgroundColor: color }} title="高亮" onClick={() => onHighlight(selection.id, color)} />)}
@@ -957,6 +963,7 @@ function PageView({
   onFollowup,
   onMove,
   onHighlight,
+  onNote,
   onDeleteHighlight,
   visualMode,
   visualSelections,
@@ -980,6 +987,7 @@ function PageView({
   onFollowup: (selection: Selection, question: string) => void;
   onMove: (id: string, offsetX: number, offsetY: number) => void;
   onHighlight: (id: string, color: string) => void;
+  onNote: (selection: Selection) => void;
   onDeleteHighlight: (id: string) => void;
   visualMode: boolean;
   visualSelections: VisualSelection[];
@@ -1291,7 +1299,7 @@ function PageView({
           {activeHighlight && <button type="button" className="highlight-delete" aria-label="删除高亮" title="删除高亮" style={{ left: `${Math.min(97, (activeHighlight.area.x + activeHighlight.area.width) * 100)}%`, top: `${Math.max(0, (activeHighlight.area.y + activeHighlight.area.height / 2) * 100)}%` }} onMouseEnter={() => { if (highlightHideTimer.current !== null) window.clearTimeout(highlightHideTimer.current); highlightHideTimer.current = null; setActiveHighlight(activeHighlight); }} onMouseLeave={() => { highlightHideTimer.current = window.setTimeout(() => setActiveHighlight(null), 500); }} onClick={(event) => { event.stopPropagation(); onDeleteHighlight(activeHighlight.id); setActiveHighlight(null); }}><Trash2 size={13} /></button>}
         </div>
         {loading && <div className="page-loading" />}
-        {selections.map((selection) => (
+        {selections.filter(selection => !selection.popoverClosed).map((selection) => (
           <SelectionPopover
             key={selection.id}
             selection={selection}
@@ -1301,6 +1309,7 @@ function PageView({
             onFollowup={onFollowup}
             onMove={onMove}
             onHighlight={onHighlight}
+            onNote={onNote}
           />
         ))}
         {visualSelections.map(selection => <VisualPopover key={selection.id} selection={selection} pageRef={hostRef} onClose={onVisualClose} onTask={onVisualTask} onFollowup={onVisualFollowup}/>)}
@@ -1327,6 +1336,9 @@ function App() {
   });
   const [tab, setTab] = useState<Tab>("summary");
   const [selections, setSelections] = useState<Selection[]>([]);
+  const [sidePanelTab, setSidePanelTab] = useState<"ai" | "notes">("ai");
+  const [activeNoteId, setActiveNoteId] = useState<string | null>(null);
+  const [noteDraft, setNoteDraft] = useState("");
   const [highlights, setHighlights] = useState<SavedHighlight[]>([]);
   const [visualMode, setVisualMode] = useState(false);
   const [visualSelections, setVisualSelections] = useState<VisualSelection[]>([]);
@@ -2156,6 +2168,37 @@ function App() {
       ),
     );
   }
+  function openNote(selection: Selection) {
+    setPanelOpen(true);
+    setSidePanelTab("notes");
+    setActiveNoteId(selection.id);
+    setNoteDraft(selection.note || "");
+  }
+  function startEditingNote(selection: Selection) {
+    setActiveNoteId(selection.id);
+    setNoteDraft(selection.note || "");
+  }
+  function saveNote(id: string) {
+    const note = noteDraft.trim();
+    setSelections(items => items.flatMap(item => {
+      if (item.id !== id) return [item];
+      if (!note && item.popoverClosed) return [];
+      return [{ ...item, note: note || undefined }];
+    }));
+    setActiveNoteId(null);
+    setNoteDraft("");
+  }
+  function cancelNoteEdit() {
+    setActiveNoteId(null);
+    setNoteDraft("");
+  }
+  function deleteNote(id: string) {
+    setSelections(items => items.flatMap(item => {
+      if (item.id !== id) return [item];
+      return item.popoverClosed ? [] : [{ ...item, note: undefined }];
+    }));
+    if (activeNoteId === id) cancelNoteEdit();
+  }
   async function runTask(selection: Selection, kind: "translate" | "explain") {
     updateTask(selection.id, { kind, state: "loading" });
     try {
@@ -2305,6 +2348,7 @@ function App() {
               onFollowup={() => {}}
               onMove={() => {}}
               onHighlight={() => {}}
+              onNote={() => {}}
               onDeleteHighlight={() => {}}
               visualMode={false}
               visualSelections={[]}
@@ -2449,15 +2493,15 @@ function App() {
                     (item) => item.pageNumber === index + 1,
                   )}
                   onSelect={addSelection}
-                  onClose={(id) =>
-                    setSelections((items) =>
-                      items.filter((item) => item.id !== id),
-                    )
-                  }
+                  onClose={(id) => setSelections(items => items.flatMap(item => {
+                    if (item.id !== id) return [item];
+                    return item.note?.trim() ? [{ ...item, popoverClosed: true }] : [];
+                  }))}
                   onTask={runTask}
                   onFollowup={followupExplanation}
                   onMove={moveSelection}
                   onHighlight={highlightSelection}
+                  onNote={openNote}
                   onDeleteHighlight={(id) => setHighlights((items) => items.filter((item) => item.id !== id))}
                   highlights={highlights.filter((item) => item.pageNumber === index + 1)}
                   visualMode={visualMode}
@@ -2491,12 +2535,16 @@ function App() {
         )}
         <aside className="ai-panel">
           <div className="panel-header">
+            <div className="side-panel-tabs" role="tablist" aria-label="侧边栏功能">
+              <button className={sidePanelTab === "ai" ? "active" : ""} role="tab" aria-selected={sidePanelTab === "ai"} onClick={() => setSidePanelTab("ai")}><Sparkles size={15} /> AI 助手</button>
+              <button className={sidePanelTab === "notes" ? "active" : ""} role="tab" aria-selected={sidePanelTab === "notes"} onClick={() => setSidePanelTab("notes")}><StickyNote size={15} /> 笔记 <span className="note-count">{selections.filter(item => item.note?.trim()).length}</span></button>
+            </div>
             <span className="panel-status">{usage && <small className="quota-badge">{usage.plan} · {usage.creditsRemaining} 分</small>}</span>
             <IconButton label="收起面板" onClick={() => setPanelOpen(false)}>
               <ChevronRight size={17} />
             </IconButton>
           </div>
-          <div className="panel-content ai-reading-panel">
+          {sidePanelTab === "ai" ? <><div className="panel-content ai-reading-panel">
             {(
               [
                 ["short", "三行摘要", summary.short],
@@ -2621,7 +2669,18 @@ function App() {
                 </select>
               </div>
             </div>
-          </div>
+          </div></> : <div className="panel-content notes-panel">
+            {selections.filter(item => item.note?.trim()).length === 0 && activeNoteId === null ? <div className="notes-panel-empty"><StickyNote size={24} /><strong>还没有笔记</strong><p>选中论文中的句子，点击“笔记”即可记录你的想法。</p></div> : <div className="notes-list">
+              {selections.filter(item => item.note?.trim() || item.id === activeNoteId).map(selection => {
+                const editing = selection.id === activeNoteId;
+                return <article className={`note-card${editing ? " editing" : ""}`} key={selection.id} onClick={() => { if (!editing) { goToPage(selection.pageNumber); startEditingNote(selection); } }}>
+                  <div className="note-card-meta"><span>第 {selection.pageNumber} 页</span><div className="note-card-actions"><button type="button" aria-label="编辑笔记" title="编辑笔记" onClick={event => { event.stopPropagation(); startEditingNote(selection); }}><StickyNote size={14} /></button><button type="button" aria-label="删除笔记" title="删除笔记" onClick={event => { event.stopPropagation(); deleteNote(selection.id); }}><Trash2 size={14} /></button></div></div>
+                  <button type="button" className="note-source" onClick={event => { event.stopPropagation(); goToPage(selection.pageNumber); }} title="定位原文">{selection.text}</button>
+                  {editing ? <textarea className="note-editor" autoFocus value={noteDraft} placeholder="写下这段内容的理解、疑问或待办…" onChange={event => setNoteDraft(event.target.value)} onBlur={() => saveNote(selection.id)} onClick={event => event.stopPropagation()} onKeyDown={event => { if ((event.metaKey || event.ctrlKey) && event.key === "Enter") { event.currentTarget.blur(); } if (event.key === "Escape") { event.preventDefault(); cancelNoteEdit(); } }} /> : <p className="note-content">{selection.note}</p>}
+                </article>;
+              })}
+            </div>}
+          </div>}
         </aside>
       </main>
       <NoticeStack notices={notices} onDismiss={dismissNotice}/>

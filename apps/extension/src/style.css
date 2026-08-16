@@ -1122,6 +1122,41 @@ body.is-resizing-panel * {
   font-weight: 700;
   font-size: 14px;
 }
+.side-panel-tabs {
+  align-self: stretch;
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  min-width: 0;
+}
+.side-panel-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  padding: 0 8px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.side-panel-tabs button:hover { color: var(--text); background: color-mix(in srgb, var(--accent) 6%, transparent); }
+.side-panel-tabs button.active { color: var(--accent); border-bottom-color: var(--accent); }
+.note-count {
+  display: grid;
+  min-width: 17px;
+  height: 17px;
+  place-items: center;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 13%, var(--surface));
+  color: inherit;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.panel-status { margin-left: auto; }
 .panel-content {
   flex: 1;
   min-height: 0;
@@ -1453,6 +1488,82 @@ body.is-resizing-panel * {
 .composer-footer { display: flex; align-items: center; justify-content: flex-start; margin-top: 4px; }
 .composer-footer .composer-model { display: inline-flex; align-items: center; gap: 5px; color: var(--text-secondary); }
 .composer-footer .composer-model select { max-width: 190px; border: 0; background: transparent; color: var(--text-secondary); font-size: 11px; outline: 0; padding: 3px 2px; }
+.notes-panel { padding: 12px; background: transparent; }
+.notes-panel-empty {
+  min-height: 240px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 24px;
+  color: var(--text-muted);
+  text-align: center;
+}
+.notes-panel-empty svg { color: var(--accent); }
+.notes-panel-empty strong { color: var(--text); font-size: 14px; }
+.notes-panel-empty p { max-width: 245px; margin: 0; font-size: 12px; line-height: 1.65; }
+.notes-list { display: flex; flex-direction: column; gap: 10px; }
+.note-card {
+  border: 1px solid color-mix(in srgb, var(--accent) 16%, var(--border));
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--surface) 83%, var(--accent-soft));
+  padding: 10px;
+  box-shadow: 0 7px 18px color-mix(in srgb, var(--accent) 5%, transparent);
+  cursor: pointer;
+  transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease;
+}
+.note-card:hover, .note-card.editing { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); box-shadow: 0 9px 22px color-mix(in srgb, var(--accent) 11%, transparent); }
+.note-card:hover { transform: translateY(-1px); }
+.note-card-meta { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--accent); font-size: 11px; font-weight: 650; }
+.note-card-actions { display: flex; gap: 2px; opacity: .72; }
+.note-card:hover .note-card-actions, .note-card.editing .note-card-actions { opacity: 1; }
+.note-card-actions button {
+  display: grid;
+  width: 25px;
+  height: 25px;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.note-card-actions button:hover { background: var(--accent-soft); color: var(--accent); }
+.note-card-actions button:last-child:hover { background: color-mix(in srgb, #e05264 12%, transparent); color: #d24759; }
+.note-source {
+  display: -webkit-box;
+  width: 100%;
+  overflow: hidden;
+  margin: 7px 0 8px;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.55;
+  text-align: left;
+  cursor: pointer;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.note-source:hover { color: var(--accent); }
+.note-content { margin: 0; color: var(--text); font-size: 13px; line-height: 1.62; white-space: pre-wrap; }
+.note-editor {
+  display: block;
+  width: 100%;
+  min-height: 94px;
+  resize: vertical;
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border));
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 9px;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.note-editor:focus { outline: 2px solid color-mix(in srgb, var(--accent) 30%, transparent); outline-offset: 1px; }
 :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
