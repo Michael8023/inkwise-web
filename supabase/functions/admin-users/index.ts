@@ -104,8 +104,24 @@ Deno.serve(async req => {
           provider: String(item?.provider || "其他").trim(),
         }));
         if (normalized.some(item => !/^[a-zA-Z0-9._:/-]{1,180}$/.test(item.id) || !item.name || item.name.length > 180 || item.provider.length > 48) || new Set(normalized.map(item => item.id)).size !== normalized.length) throw new Error("INVALID_MODELS");
-        const { error } = await db.rpc("admin_sync_model_catalog", { p_admin_user_id: currentUser.id, p_models: normalized });
-        if (error) throw error;
+        // PostgREST refuses broad updates without a predicate. Keep the
+        // allow-list update explicit here instead of relying on a database
+        // routine whose broad disable step can be rejected by the gateway.
+        const { error: disableError } = await db.from("model_catalog")
+          .update({ enabled: false })
+          .neq("model_id", "");
+        if (disableError) throw disableError;
+        const { error: upsertError } = await db.from("model_catalog").upsert(
+          normalized.map(item => ({
+            model_id: item.id,
+            display_name: item.name,
+            provider: item.provider,
+            enabled: true,
+            available_features: ["summary", "explain", "chat", "visual"],
+          })),
+          { onConflict: "model_id" },
+        );
+        if (upsertError) throw upsertError;
         return json({ ok: true, enabled: normalized.length });
       }
       if (input.action === "savePlan") {
