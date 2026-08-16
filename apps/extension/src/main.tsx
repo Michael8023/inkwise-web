@@ -484,7 +484,7 @@ function WelcomeScreen({
             <div className="art-kicker">SHIDEA / READING NOTES</div>
             <div className="art-title">Understanding<br />through context.</div>
             <div className="art-lines"><i /><i /><i /><i /></div>
-            <div className="art-highlight">The meaning of a sentence lives in the pages around it.</div>
+            <div className="art-highlight">seek the truth with a <strong>shine idea</strong></div>
             <div className="art-footer"><span>01</span><span>READ WITH CLARITY</span></div>
           </div>
           <div className="welcome-marker">✦</div>
