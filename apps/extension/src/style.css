@@ -249,6 +249,14 @@ button {
 .visual-tool-icon i { position: absolute; right: -4px; bottom: -4px; width: 8px; height: 8px; border: 1.5px solid var(--surface); border-radius: 50%; box-shadow: 0 1px 3px rgb(0 0 0 / .18); }
 .visual-tool-icon i.pending { background: #e25b63; }
 .visual-tool-icon i.ready { background: #38b77d; }
+.library-add-trigger { display: inline-flex; align-items: center; width: 32px; height: 32px; overflow: hidden; gap: 7px; border: 0; border-radius: 7px; background: transparent; color: var(--text-secondary); padding: 0 7px; white-space: nowrap; cursor: pointer; transition: width .24s cubic-bezier(.2,.8,.2,1), background .18s ease, color .18s ease, box-shadow .18s ease; }
+.library-add-trigger:hover,.library-add-trigger:focus-visible { width: 134px; background: var(--accent-soft); color: var(--accent); box-shadow: 0 3px 10px color-mix(in srgb, var(--accent) 15%, transparent); }
+.library-add-trigger > span:last-child { max-width: 0; overflow: hidden; font-size: 12px; font-weight: 750; opacity: 0; transition: max-width .24s ease, opacity .16s ease; }
+.library-add-trigger:hover > span:last-child,.library-add-trigger:focus-visible > span:last-child { max-width: 104px; opacity: 1; }
+.library-add-icon { position: relative; display: grid; flex: 0 0 18px; place-items: center; }
+.library-add-icon i { position: absolute; right: -4px; bottom: -4px; width: 8px; height: 8px; border: 1.5px solid var(--surface); border-radius: 50%; box-shadow: 0 1px 3px rgb(0 0 0 / .18); }
+.library-add-icon i.pending { background: #e25b63; }
+.library-add-icon i.ready { background: #38b77d; }
 .account-trigger { min-height: 34px; display: inline-flex; align-items: center; gap: 7px; border: 1px solid color-mix(in srgb, var(--accent) 36%, var(--border)); border-radius: 8px; background: color-mix(in srgb, var(--accent-soft) 65%, var(--surface)); color: var(--accent); padding: 0 10px; font-size: 12px; font-weight: 750; cursor: pointer; transition: background .16s ease, border-color .16s ease, transform .16s ease; }.account-trigger:hover { border-color: var(--accent); background: var(--accent-soft); transform: translateY(-1px); }.account-trigger svg { flex: 0 0 auto; }
 .open-button,
 .drop-zone button,
@@ -436,6 +444,8 @@ button {
 .welcome-primary:hover { background: linear-gradient(135deg, #38d6cd, #079b9d); box-shadow: 0 14px 25px rgb(7 139 142 / .32); }
 .welcome-secondary { border: 1px solid #b9e2de; background: rgb(255 255 255 / .86); box-shadow: 0 7px 16px rgb(6 52 119 / .08); color: #063477; }
 .welcome-secondary:hover { border-color: #18bdb5; background: #effcf9; box-shadow: 0 12px 24px rgb(7 139 142 / .16); }
+.welcome-workspace { border: 1px solid #d5e4e3; background: rgb(255 255 255 / .7); box-shadow: 0 7px 16px rgb(6 52 119 / .06); color: #31536b; }
+.welcome-workspace:hover { border-color: #83c9c2; background: #f3fbfa; color: #057c80; box-shadow: 0 12px 24px rgb(7 139 142 / .12); }
 .welcome-library { display: inline-flex; align-items: center; gap: 7px; margin-top: 20px; border: 0; background: transparent; color: #597083; padding: 4px 0; font-size: 13px; cursor: pointer; }
 .welcome-library:hover { color: #078b8e; }
 .welcome-art { position: relative; width: min(100%, 470px); height: 510px; justify-self: center; }

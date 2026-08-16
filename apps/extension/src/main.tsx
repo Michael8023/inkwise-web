@@ -42,6 +42,7 @@ import {
   Table2,
   Download,
   StickyNote,
+  FilePlus2,
 } from "lucide-react";
 import "./style.css";
 import { mountAdmin } from "./admin";
@@ -529,11 +530,13 @@ function WelcomeScreen({
   onOpenFile,
   onOpenUrl,
   onOpenAccount,
+  onOpenLibrary,
 }: {
   session: AuthSession | null;
   onOpenFile: () => void;
   onOpenUrl: () => void;
   onOpenAccount: () => void;
+  onOpenLibrary: () => void;
 }) {
   const displayName = session ? String(session.user.user_metadata?.display_name || session.user.user_metadata?.username || session.user.email || "") : "";
   return (
@@ -554,6 +557,7 @@ function WelcomeScreen({
           <div className="welcome-actions">
             <button className="welcome-primary" onClick={onOpenFile}><FolderOpen size={18} />打开本地 PDF</button>
             <button className="welcome-secondary" onClick={onOpenUrl}><Link size={17} />导入论文链接</button>
+            <button className="welcome-workspace" onClick={onOpenLibrary}><FolderOpen size={17} />文献工作台</button>
           </div>
           <button className="welcome-library" onClick={onOpenAccount}><UserRound size={17} />{session ? "查看账户与 AI 额度" : "登录后使用 AI 功能"}</button>
         </div>
@@ -1609,7 +1613,7 @@ function App() {
     detectedDocumentTitle.current = title;
     setDocumentTitle(title);
   }
-  async function archiveCurrentDocument() {
+  async function archiveCurrentDocument(announceExisting = false) {
     if (!session || !pdf || !pdfBytes.current) return;
     if (pdfBytes.current.byteLength > MAX_LIBRARY_PDF_BYTES) {
       showNotice("该 PDF 超过 Supabase Free 的 50 MB 上限，已在本次阅读中打开，但未保存到文献库。", "info");
@@ -1629,6 +1633,7 @@ function App() {
         await supabase.from("library_papers").update({ last_opened_at: new Date().toISOString() }).eq("id", existing.id);
         const saved = await loadPaperState(existing.id);
         hydrateLibraryState(saved);
+        if (announceExisting) showNotice("这篇文献已在我的文献库中。", "success");
         return;
       }
       const title = detectedDocumentTitle.current || documentTitle || fileName.replace(/\.pdf$/i, "") || "未命名文献";
@@ -1661,6 +1666,18 @@ function App() {
     } catch (error) {
       showNotice(`文献库保存失败：${readableApiError(error, "请稍后重试。")}`, "error");
     }
+  }
+  async function addCurrentDocumentToLibrary() {
+    if (!session) {
+      showNotice("登录后即可将文献保存到个人文献库。", "info");
+      setAuthOpen(true);
+      return;
+    }
+    if (currentPaperId) {
+      showNotice("这篇文献已在我的文献库中。", "success");
+      return;
+    }
+    await archiveCurrentDocument(true);
   }
   function hydrateLibraryState(saved: Awaited<ReturnType<typeof loadPaperState>>) {
     libraryHydrating.current = true;
@@ -2380,6 +2397,7 @@ function App() {
           onOpenFile={() => fileInput.current?.click()}
           onOpenUrl={() => setUrlOpen(true)}
           onOpenAccount={() => setAuthOpen(true)}
+          onOpenLibrary={() => session ? setLibraryOpen(true) : setAuthOpen(true)}
         />
         <input ref={fileInput} className="welcome-file-input" type="file" accept="application/pdf" onChange={(event) => event.target.files?.[0] && openFile(event.target.files[0])} />
         {authOpen && (session ? <AccountDialog session={session} usage={usage} onClose={() => setAuthOpen(false)} onSignOut={() => { signOut(); setAuthOpen(false); }} onOpenLibrary={() => { setAuthOpen(false); setLibraryOpen(true); }} /> : <AuthDialog mode={authMode} email={authEmail} password={authPassword} name={authName} code={authCode} error={authError} notice={authNotice} verifying={authVerifying} busy={authBusy} busyLabel={authBusyLabel} onClose={() => setAuthOpen(false)} onSubmit={submitAuth} onVerify={verifyEmailCode} onResend={resendEmailCode} onModeChange={(nextMode) => { setAuthMode(nextMode); setAuthVerifying(false); setAuthError(""); setAuthNotice(""); }} onEmail={setAuthEmail} onPassword={setAuthPassword} onName={setAuthName} onCode={setAuthCode} />)}
@@ -2489,6 +2507,9 @@ function App() {
           </div>
         )}
         <div className="topbar-right">
+          <button className="library-add-trigger" aria-label={currentPaperId ? "已添加到我的文献库" : "添加到我的文献库"} title={currentPaperId ? "已添加到我的文献库" : "添加到我的文献库"} onClick={() => void addCurrentDocumentToLibrary()}>
+            <span className="library-add-icon"><FilePlus2 size={18} /><i className={currentPaperId ? "ready" : "pending"} /></span><span>{currentPaperId ? "已在文献库" : "添加到我的文献库"}</span>
+          </button>
           <IconButton label="下载 PDF" onClick={downloadPdf}>
             <Download size={18} />
           </IconButton>
