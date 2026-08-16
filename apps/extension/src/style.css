@@ -185,6 +185,8 @@ button {
 .quota-summary strong { color: var(--text); font-size: 14px; }
 .account-signout { min-height: 40px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid color-mix(in srgb, var(--danger) 24%, var(--border)); border-radius: 9px; background: transparent; color: var(--danger); padding: 8px; cursor: pointer; }
 .account-signout:hover { background: color-mix(in srgb, var(--danger) 8%, transparent); }
+.account-library { min-height: 42px; display: flex; align-items: center; gap: 8px; border: 1px solid color-mix(in srgb, var(--accent) 36%, var(--border)); border-radius: 9px; background: color-mix(in srgb, var(--accent-soft) 72%, var(--surface)); color: var(--accent); padding: 9px 11px; font-size: 12px; font-weight: 750; cursor: pointer; }
+.account-library:hover { background: var(--accent-soft); }.account-library svg:last-child { margin-left: auto; }
 .quota-badge { margin-left: 6px; color: var(--accent); font-size: 11px; font-weight: 600; }
 .filename {
   min-width: 0;

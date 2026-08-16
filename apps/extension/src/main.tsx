@@ -395,7 +395,7 @@ function AuthDialog({
   </form></div>;
 }
 
-function AccountDialog({ session, usage, onClose, onSignOut }: { session: AuthSession; usage: Usage | null; onClose: () => void; onSignOut: () => void }) {
+function AccountDialog({ session, usage, onClose, onSignOut, onOpenLibrary }: { session: AuthSession; usage: Usage | null; onClose: () => void; onSignOut: () => void; onOpenLibrary: () => void }) {
   const displayName = String(session.user.user_metadata?.display_name || session.user.user_metadata?.username || "识谛用户");
   const initial = displayName.trim().slice(0, 1).toUpperCase() || "I";
   const creditAmount = usage?.creditsRemaining ?? 0;
@@ -405,6 +405,7 @@ function AccountDialog({ session, usage, onClose, onSignOut }: { session: AuthSe
     <div className="account-hero"><div className="account-avatar">{initial}</div><div><p>账户中心</p><h2>{displayName}</h2><span>{session.user.email}</span></div></div>
     <section className="account-credits"><div><span>可用 AI 额度</span><strong>{creditAmount}<small> 分</small></strong></div><div className="credit-orbit"><Sparkles size={19} /></div></section>
     <div className="quota-summary"><span>当前套餐<strong>{usage?.plan ? usage.plan.toUpperCase() : "FREE"}</strong></span><span>结算日期<strong>{usage?.periodEnd ? new Date(usage.periodEnd).toLocaleDateString("zh-CN", { month: "short", day: "numeric" }) : "每月"}</strong></span></div>
+    <button type="button" className="account-library" onClick={onOpenLibrary}><FolderOpen size={16} />打开文献工作台<ChevronRight size={16} /></button>
     <button type="button" className="account-signout" onClick={onSignOut}><LogOut size={15} />退出登录</button>
   </section></div>;
 }
@@ -482,13 +483,11 @@ function WelcomeScreen({
   onOpenFile,
   onOpenUrl,
   onOpenAccount,
-  onOpenLibrary,
 }: {
   session: AuthSession | null;
   onOpenFile: () => void;
   onOpenUrl: () => void;
   onOpenAccount: () => void;
-  onOpenLibrary: () => void;
 }) {
   const displayName = session ? String(session.user.user_metadata?.display_name || session.user.user_metadata?.username || session.user.email || "") : "";
   return (
@@ -498,9 +497,9 @@ function WelcomeScreen({
           <img src="/brand/shidea-mark.png" alt="识谛 shidea" />
           <span>识谛</span><em>shidea</em>
         </div>
-        <button className="welcome-account" onClick={session ? onOpenLibrary : onOpenAccount}>
+        <button className="welcome-account" onClick={onOpenAccount}>
           {session ? <UserRound size={16} /> : <LogIn size={16} />}
-          {session ? "文献库" : "登录"}
+          {session ? "个人中心" : "登录"}
         </button>
       </header>
       <section className="welcome-stage">
@@ -1447,9 +1446,6 @@ function App() {
     refreshUsage();
   }, [session]);
   useEffect(() => {
-    if (session && !pdf && !pdfOpening && !urlLoading) setLibraryOpen(true);
-  }, [session, pdf, pdfOpening, urlLoading]);
-  useEffect(() => {
     if (session && currentPaperId) window.localStorage.setItem(`shidea-last-paper:${session.user.id}`, currentPaperId);
   }, [session, currentPaperId]);
   useEffect(() => {
@@ -2217,10 +2213,9 @@ function App() {
           onOpenFile={() => fileInput.current?.click()}
           onOpenUrl={() => setUrlOpen(true)}
           onOpenAccount={() => setAuthOpen(true)}
-          onOpenLibrary={() => setLibraryOpen(true)}
         />
         <input ref={fileInput} className="welcome-file-input" type="file" accept="application/pdf" onChange={(event) => event.target.files?.[0] && openFile(event.target.files[0])} />
-        {authOpen && (session ? <AccountDialog session={session} usage={usage} onClose={() => setAuthOpen(false)} onSignOut={() => { signOut(); setAuthOpen(false); }} /> : <AuthDialog mode={authMode} email={authEmail} password={authPassword} name={authName} code={authCode} error={authError} notice={authNotice} verifying={authVerifying} onClose={() => setAuthOpen(false)} onSubmit={submitAuth} onVerify={verifyEmailCode} onResend={resendEmailCode} onModeChange={(nextMode) => { setAuthMode(nextMode); setAuthVerifying(false); setAuthError(""); setAuthNotice(""); }} onEmail={setAuthEmail} onPassword={setAuthPassword} onName={setAuthName} onCode={setAuthCode} />)}
+        {authOpen && (session ? <AccountDialog session={session} usage={usage} onClose={() => setAuthOpen(false)} onSignOut={() => { signOut(); setAuthOpen(false); }} onOpenLibrary={() => { setAuthOpen(false); setLibraryOpen(true); }} /> : <AuthDialog mode={authMode} email={authEmail} password={authPassword} name={authName} code={authCode} error={authError} notice={authNotice} verifying={authVerifying} onClose={() => setAuthOpen(false)} onSubmit={submitAuth} onVerify={verifyEmailCode} onResend={resendEmailCode} onModeChange={(nextMode) => { setAuthMode(nextMode); setAuthVerifying(false); setAuthError(""); setAuthNotice(""); }} onEmail={setAuthEmail} onPassword={setAuthPassword} onName={setAuthName} onCode={setAuthCode} />)}
         {urlOpen && <UrlImportDialog value={paperUrl} error={urlError} loading={urlLoading} onChange={value => { setPaperUrl(value); setUrlError(""); }} onClose={() => setUrlOpen(false)} onSubmit={openPdfUrl} />}
         {!embeddedReader && <ExtensionAutoOpenToggle />}
       </div>
@@ -2585,7 +2580,7 @@ function App() {
         </aside>
       </main>
       {libraryNotice && <button className="library-sync-notice" onClick={() => setLibraryNotice("")}>{libraryNotice}</button>}
-      {authOpen && (session ? <AccountDialog session={session} usage={usage} onClose={() => setAuthOpen(false)} onSignOut={() => { signOut(); setAuthOpen(false); }} /> : <AuthDialog mode={authMode} email={authEmail} password={authPassword} name={authName} code={authCode} error={authError} notice={authNotice} verifying={authVerifying} onClose={() => setAuthOpen(false)} onSubmit={submitAuth} onVerify={verifyEmailCode} onResend={resendEmailCode} onModeChange={(nextMode) => { setAuthMode(nextMode); setAuthVerifying(false); setAuthError(""); setAuthNotice(""); }} onEmail={setAuthEmail} onPassword={setAuthPassword} onName={setAuthName} onCode={setAuthCode} />)}
+      {authOpen && (session ? <AccountDialog session={session} usage={usage} onClose={() => setAuthOpen(false)} onSignOut={() => { signOut(); setAuthOpen(false); }} onOpenLibrary={() => { setAuthOpen(false); setLibraryOpen(true); }} /> : <AuthDialog mode={authMode} email={authEmail} password={authPassword} name={authName} code={authCode} error={authError} notice={authNotice} verifying={authVerifying} onClose={() => setAuthOpen(false)} onSubmit={submitAuth} onVerify={verifyEmailCode} onResend={resendEmailCode} onModeChange={(nextMode) => { setAuthMode(nextMode); setAuthVerifying(false); setAuthError(""); setAuthNotice(""); }} onEmail={setAuthEmail} onPassword={setAuthPassword} onName={setAuthName} onCode={setAuthCode} />)}
       {urlOpen && <UrlImportDialog value={paperUrl} error={urlError} loading={urlLoading} onChange={value => { setPaperUrl(value); setUrlError(""); }} onClose={() => setUrlOpen(false)} onSubmit={openPdfUrl} />}
       {!embeddedReader && <ExtensionAutoOpenToggle />}
     </div>
