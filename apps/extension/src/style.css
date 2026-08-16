@@ -433,7 +433,7 @@ button {
 .art-highlight-initial {
   display: inline-block;
   margin: 0 -1px -7px -1px;
-  color: #057c80;
+  color: inherit;
   font-family: "Bodoni 72", Didot, Georgia, "Times New Roman", serif;
   font-size: 37px;
   font-style: normal;
