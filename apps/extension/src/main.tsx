@@ -312,6 +312,31 @@ function collectMineruOutline(values: unknown[], pageCount: number): OutlineItem
   }
   return roots;
 }
+
+function collectMineruDocumentTitle(values: unknown[], pageCount: number): string | null {
+  const candidates: Array<{ text: string; rank: number; top: number }> = [];
+  const visit = (node: any, inheritedPage?: number) => {
+    if (!node || typeof node !== "object") return;
+    if (Array.isArray(node)) { node.forEach(item => visit(item, inheritedPage)); return; }
+    const page = Number(node.page_idx ?? node.page_id ?? node.page_no ?? node.page ?? inheritedPage);
+    const type = String(node.type || node.category || node.block_type || node.layout_type || "").toLowerCase();
+    const text = String(node.text ?? node.content ?? node.md_text ?? "").replace(/\s+/g, " ").trim();
+    const level = Number(node.text_level ?? node.level ?? node.heading_level ?? node.title_level);
+    // MinerU's document title lives on page one as a `title`/`doc_title`
+    // block. Section headings may also use title-like labels, so favour an
+    // explicit document title, then the highest level title closest to top.
+    const explicitDocumentTitle = /(?:^|[_\s-])(?:doc|document)[_\s-]*title(?:$|[_\s-])/.test(type);
+    const pageOneTitle = page === 0 && /title/.test(type) && (!Number.isFinite(level) || level <= 1);
+    if (text.length >= 3 && text.length <= 500 && (explicitDocumentTitle || pageOneTitle) && page >= 0 && page < pageCount) {
+      const box = mineruBox(node.bbox || node.box || node.bounding_box || node.poly);
+      candidates.push({ text, rank: explicitDocumentTitle ? 0 : 1, top: box?.[1] ?? Number.MAX_SAFE_INTEGER });
+    }
+    Object.entries(node).forEach(([key, child]) => { if (!['bbox', 'box', 'bounding_box', 'poly', 'text', 'content', 'md_text'].includes(key)) visit(child, page); });
+  };
+  values.forEach(value => visit(value));
+  candidates.sort((a, b) => a.rank - b.rank || a.top - b.top || a.text.length - b.text.length);
+  return candidates[0]?.text || null;
+}
 const apiErrors: Record<string, string> = {
   AUTH_REQUIRED: "请先登录后使用 AI 功能。",
   QUOTA_EXCEEDED: "AI 额度不足，请联系管理员充值。",
@@ -1247,6 +1272,7 @@ function PageView({
 function App() {
   const [pdf, setPdf] = useState<any>(null);
   const [fileName, setFileName] = useState("");
+  const [documentTitle, setDocumentTitle] = useState("");
   const [outline, setOutline] = useState<OutlineItem[]>([]);
   const [scale, setScale] = useState(1.2);
   const [currentPage, setCurrentPage] = useState(1);
@@ -1421,6 +1447,12 @@ function App() {
     refreshUsage();
   }, [session]);
   useEffect(() => {
+    if (session && !pdf && !pdfOpening && !urlLoading) setLibraryOpen(true);
+  }, [session, pdf, pdfOpening, urlLoading]);
+  useEffect(() => {
+    if (session && currentPaperId) window.localStorage.setItem(`shidea-last-paper:${session.user.id}`, currentPaperId);
+  }, [session, currentPaperId]);
+  useEffect(() => {
     if (!session || !pdf || !documentReady || currentPaperId || librarySaveAttempted.current === documentId) return;
     librarySaveAttempted.current = documentId;
     void archiveCurrentDocument();
@@ -1429,7 +1461,11 @@ function App() {
     if (!session || !currentPaperId || !documentReady || !paperStateLoaded || libraryHydrating.current) return;
     const timer = window.setTimeout(() => void persistLibraryState(), 900);
     return () => window.clearTimeout(timer);
-  }, [session, currentPaperId, documentReady, paperStateLoaded, currentPage, scale, highlights, selections, visualSelections, mineruRegions, mineruReady, outline, summary, messages]);
+  }, [session, currentPaperId, documentReady, paperStateLoaded, currentPage, scale, highlights, selections, visualSelections, mineruRegions, mineruReady, documentTitle, outline, summary, messages]);
+  useEffect(() => {
+    if (!session || !currentPaperId || !documentTitle) return;
+    void supabase.from("library_papers").update({ title: documentTitle.slice(0, 500) }).eq("id", currentPaperId);
+  }, [session, currentPaperId, documentTitle]);
   useEffect(() => {
     if (nativePdfView || !session || !documentReady || !documentId || !paperStateLoaded || mineruReady || autoLayoutDocument.current === documentId) return;
     autoLayoutDocument.current = documentId;
@@ -1495,9 +1531,7 @@ function App() {
         hydrateLibraryState(saved);
         return;
       }
-      const metadata = await pdf.getMetadata().catch(() => null);
-      const metadataTitle = String(metadata?.info?.Title || "").trim();
-      const title = metadataTitle || fileName.replace(/\.pdf$/i, "") || "未命名文献";
+      const title = fileName.replace(/\.pdf$/i, "") || "未命名文献";
       const id = crypto.randomUUID();
       const storagePath = `${session.user.id}/${id}.pdf`;
       const { error: uploadError } = await supabase.storage.from("library-pdfs").upload(
@@ -1542,6 +1576,7 @@ function App() {
     setSummary(state.summary && typeof state.summary === "object" ? state.summary as { short?: string; full?: string } : {});
     setMineruRegions(Array.isArray(layout.regions) ? layout.regions as VisualRegion[] : []);
     setMineruReady(Boolean(layout.ready));
+    setDocumentTitle(typeof layout.documentTitle === "string" ? layout.documentTitle : "");
     if (Array.isArray(layout.outline) && layout.outline.length) setOutline(layout.outline as OutlineItem[]);
     setPaperStateLoaded(true);
     window.setTimeout(() => {
@@ -1556,7 +1591,7 @@ function App() {
       currentPage, scale, highlights, selections, visualSelections: [], messages,
       summary: { short: summary.short, full: summary.full },
     };
-    const layoutResult = mineruReady ? { ready: true, regions: mineruRegions, outline } : null;
+    const layoutResult = mineruReady ? { ready: true, regions: mineruRegions, outline, documentTitle: documentTitle || null } : null;
     const { error } = await supabase.from("library_paper_states").upsert({
       paper_id: currentPaperId, user_id: session.user.id, reader_state: readerState, layout_result: layoutResult, updated_at: new Date().toISOString(),
     });
@@ -1566,6 +1601,7 @@ function App() {
   async function openLibraryPaper(paper: LibraryPaper) {
     try {
       setLibraryNotice("");
+      setPdfOpening(true);
       const { data, error } = await supabase.storage.from("library-pdfs").createSignedUrl(paper.storage_path, 300);
       if (error || !data?.signedUrl) throw error || new Error("LIBRARY_URL_FAILED");
       const response = await fetch(data.signedUrl);
@@ -1576,6 +1612,7 @@ function App() {
       hydrateLibraryState(saved);
       await supabase.from("library_papers").update({ last_opened_at: new Date().toISOString() }).eq("id", paper.id);
     } catch {
+      setPdfOpening(false);
       setLibraryNotice("无法打开这篇文献，请稍后重试。");
     }
   }
@@ -1659,7 +1696,7 @@ function App() {
     setCurrentPaperId(options.paperId || "");
     setPaperStateLoaded(!options.paperId);
     importSourceUrl.current = options.sourceUrl || null;
-    setSelections([]); setHighlights([]); setVisualSelections([]); setVisualMode(false); setMineruRegions([]); setMineruReady(false); setLayoutState({ state: "idle" }); setLayoutNoticeVisible(false); autoLayoutDocument.current = "";
+    setSelections([]); setHighlights([]); setVisualSelections([]); setVisualMode(false); setMineruRegions([]); setMineruReady(false); setDocumentTitle(""); setLayoutState({ state: "idle" }); setLayoutNoticeVisible(false); autoLayoutDocument.current = "";
     setDocumentReady(false); setDocumentText(""); setPdf(null); setOutline([]);
     setFileName(name);
     setSummary({}); setSummaryOpen({ short: false, full: false });
@@ -1827,7 +1864,9 @@ function App() {
       const sizes = await Promise.all(Array.from({ length: pdf.numPages }, (_, index) => pdf.getPage(index + 1).then((page: any) => { const viewport = page.getViewport({ scale: 1 }); return { width: viewport.width, height: viewport.height }; })));
       const regions = raw.flatMap((value: unknown) => collectMineruRegions(value, sizes));
       const parsedOutline = collectMineruOutline(raw, pdf.numPages);
+      const parsedTitle = collectMineruDocumentTitle(raw, pdf.numPages);
       if (parsedOutline.length) setOutline(parsedOutline);
+      if (parsedTitle) setDocumentTitle(parsedTitle);
       setMineruRegions(regions); setMineruReady(true);
       setLayoutState({ state: "done", message: regions.length ? `阅读体验优化完成：已识别 ${regions.filter((item: VisualRegion) => item.kind === "image").length} 张图片、${regions.filter((item: VisualRegion) => item.kind === "table").length} 个表格与 ${regions.filter((item: VisualRegion) => item.kind === "formula").length} 条公式` : "阅读体验优化完成，未发现可交互结构区域。", progress: 100 });
     } catch (error) {
@@ -2150,7 +2189,13 @@ function App() {
     goToPage(pageIndex + 1);
   }
 
-  if (libraryOpen && session) return <LibraryScreen onClose={() => setLibraryOpen(false)} onOpen={paper => void openLibraryPaper(paper)} />;
+  if (libraryOpen && session) return <LibraryScreen
+    canReturn={Boolean(pdf)}
+    onClose={() => setLibraryOpen(false)}
+    onOpen={paper => void openLibraryPaper(paper)}
+    onImportFile={file => { setLibraryOpen(false); void openFile(file); }}
+    onImportUrl={async value => { setLibraryOpen(false); await loadPdfUrl(value, true); }}
+  />;
 
   if (!pdf) {
     // Both local and URL imports clear the previous document before PDF.js
@@ -2239,7 +2284,7 @@ function App() {
             <img className="brand-mark" src="/brand/shidea-mark.png" alt="" />
             识谛 <span className="brand-english">shidea</span>
           </strong>
-          <span className="filename">{fileName || "未打开文档"}</span>
+          <span className="filename">{documentTitle || fileName || "未打开文档"}</span>
         </div>
         {pdf && (
           <div className="topbar-center">
