@@ -5,6 +5,7 @@ import * as pdfjsLib from "pdfjs-dist";
 import JSZip from "jszip";
 import * as THREE from "three";
 import { functionRequest, supabase, supabaseConfigured } from "./api";
+import { LibraryScreen, type LibraryPaper, loadPaperState } from "./library";
 import {
   ChevronDown,
   ChevronRight,
@@ -98,6 +99,12 @@ type AuthSession = { user: { id: string; email?: string; user_metadata?: Record<
 type Usage = { plan: string; creditsRemaining: number; periodEnd: string | null };
 const PUBLIC_READER_ORIGIN = "https://www.inkwise.site";
 const MAX_PDF_IMPORT_BYTES = 128 * 1024 * 1024;
+const MAX_LIBRARY_PDF_BYTES = 50 * 1024 * 1024;
+
+async function contentHash(bytes: ArrayBuffer) {
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+}
 
 function modelBrand(modelId: string) {
   const value = modelId.toLowerCase();
@@ -450,11 +457,13 @@ function WelcomeScreen({
   onOpenFile,
   onOpenUrl,
   onOpenAccount,
+  onOpenLibrary,
 }: {
   session: AuthSession | null;
   onOpenFile: () => void;
   onOpenUrl: () => void;
   onOpenAccount: () => void;
+  onOpenLibrary: () => void;
 }) {
   const displayName = session ? String(session.user.user_metadata?.display_name || session.user.user_metadata?.username || session.user.email || "") : "";
   return (
@@ -464,9 +473,9 @@ function WelcomeScreen({
           <img src="/brand/shidea-mark.png" alt="识谛 shidea" />
           <span>识谛</span><em>shidea</em>
         </div>
-        <button className="welcome-account" onClick={onOpenAccount}>
+        <button className="welcome-account" onClick={session ? onOpenLibrary : onOpenAccount}>
           {session ? <UserRound size={16} /> : <LogIn size={16} />}
-          {session ? String(session.user.user_metadata?.display_name || session.user.email || "账户") : "登录"}
+          {session ? "文献库" : "登录"}
         </button>
       </header>
       <section className="welcome-stage">
@@ -1260,6 +1269,9 @@ function App() {
   const [layoutState, setLayoutState] = useState<LayoutState>({ state: "idle" });
   const [layoutNoticeVisible, setLayoutNoticeVisible] = useState(false);
   const pdfBytes = useRef<ArrayBuffer | null>(null);
+  const importSourceUrl = useRef<string | null>(null);
+  const libraryHydrating = useRef(false);
+  const librarySaveAttempted = useRef("");
   const autoLayoutDocument = useRef("");
   const fileInput = useRef<HTMLInputElement>(null);
   const readerFileInput = useRef<HTMLInputElement>(null);
@@ -1284,6 +1296,10 @@ function App() {
   const [searchNotice, setSearchNotice] = useState("");
   const [highlightMode, setHighlightMode] = useState(false);
   const [session, setSession] = useState<AuthSession | null>(null);
+  const [currentPaperId, setCurrentPaperId] = useState("");
+  const [paperStateLoaded, setPaperStateLoaded] = useState(true);
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [libraryNotice, setLibraryNotice] = useState("");
   const [usage, setUsage] = useState<Usage | null>(null);
   const [authOpen, setAuthOpen] = useState(false);
   const [authMode, setAuthMode] = useState<"login" | "register">("login");
@@ -1405,10 +1421,20 @@ function App() {
     refreshUsage();
   }, [session]);
   useEffect(() => {
-    if (nativePdfView || !session || !documentReady || !documentId || autoLayoutDocument.current === documentId) return;
+    if (!session || !pdf || !documentReady || currentPaperId || librarySaveAttempted.current === documentId) return;
+    librarySaveAttempted.current = documentId;
+    void archiveCurrentDocument();
+  }, [session, pdf, documentReady, documentId, currentPaperId]);
+  useEffect(() => {
+    if (!session || !currentPaperId || !documentReady || !paperStateLoaded || libraryHydrating.current) return;
+    const timer = window.setTimeout(() => void persistLibraryState(), 900);
+    return () => window.clearTimeout(timer);
+  }, [session, currentPaperId, documentReady, paperStateLoaded, currentPage, scale, highlights, selections, visualSelections, mineruRegions, mineruReady, outline, summary, messages]);
+  useEffect(() => {
+    if (nativePdfView || !session || !documentReady || !documentId || !paperStateLoaded || mineruReady || autoLayoutDocument.current === documentId) return;
     autoLayoutDocument.current = documentId;
     void runMineruLayout();
-  }, [nativePdfView, session, documentReady, documentId]);
+  }, [nativePdfView, session, documentReady, documentId, paperStateLoaded, mineruReady]);
   useEffect(() => {
     if (!pdf) return;
     // Let the ink bloom complete before removing the transition layer. This
@@ -1446,6 +1472,112 @@ function App() {
       const response = await functionRequest("usage");
       if (response.ok) setUsage(await response.json());
     } catch { setUsage(null); }
+  }
+  async function archiveCurrentDocument() {
+    if (!session || !pdf || !pdfBytes.current) return;
+    if (pdfBytes.current.byteLength > MAX_LIBRARY_PDF_BYTES) {
+      setLibraryNotice("该 PDF 超过 Supabase Free 的 50 MB 上限，已在本次阅读中打开，但未保存到文献库。");
+      return;
+    }
+    try {
+      const bytes = pdfBytes.current;
+      const hash = await contentHash(bytes);
+      const { data: existing, error: existingError } = await supabase
+        .from("library_papers")
+        .select("id")
+        .eq("content_hash", hash)
+        .maybeSingle();
+      if (existingError) throw existingError;
+      if (existing?.id) {
+        setCurrentPaperId(existing.id);
+        await supabase.from("library_papers").update({ last_opened_at: new Date().toISOString() }).eq("id", existing.id);
+        const saved = await loadPaperState(existing.id);
+        hydrateLibraryState(saved);
+        return;
+      }
+      const metadata = await pdf.getMetadata().catch(() => null);
+      const metadataTitle = String(metadata?.info?.Title || "").trim();
+      const title = metadataTitle || fileName.replace(/\.pdf$/i, "") || "未命名文献";
+      const id = crypto.randomUUID();
+      const storagePath = `${session.user.id}/${id}.pdf`;
+      const { error: uploadError } = await supabase.storage.from("library-pdfs").upload(
+        storagePath,
+        new Blob([bytes], { type: "application/pdf" }),
+        { contentType: "application/pdf", upsert: false },
+      );
+      if (uploadError) throw uploadError;
+      const { error: insertError } = await supabase.from("library_papers").insert({
+        id,
+        user_id: session.user.id,
+        title: title.slice(0, 500),
+        original_name: fileName || "document.pdf",
+        source_url: importSourceUrl.current,
+        storage_path: storagePath,
+        content_hash: hash,
+        file_size: bytes.byteLength,
+        page_count: pdf.numPages,
+        document_text: documentText || null,
+      });
+      if (insertError) {
+        await supabase.storage.from("library-pdfs").remove([storagePath]);
+        throw insertError;
+      }
+      setCurrentPaperId(id);
+      setLibraryNotice("已安全保存到你的文献库。");
+    } catch (error) {
+      setLibraryNotice(`文献库保存失败：${readableApiError(error, "请稍后重试。")}`);
+    }
+  }
+  function hydrateLibraryState(saved: Awaited<ReturnType<typeof loadPaperState>>) {
+    libraryHydrating.current = true;
+    const state = saved?.reader_state || {};
+    const layout = saved?.layout_result || {};
+    setScale(typeof state.scale === "number" ? state.scale : 1.2);
+    setCurrentPage(typeof state.currentPage === "number" ? state.currentPage : 1);
+    setPageInput(String(typeof state.currentPage === "number" ? state.currentPage : 1));
+    setHighlights(Array.isArray(state.highlights) ? state.highlights as SavedHighlight[] : []);
+    setSelections(Array.isArray(state.selections) ? state.selections as Selection[] : []);
+    setVisualSelections(Array.isArray(state.visualSelections) ? state.visualSelections as VisualSelection[] : []);
+    setMessages(Array.isArray(state.messages) ? state.messages as ChatMessage[] : []);
+    setSummary(state.summary && typeof state.summary === "object" ? state.summary as { short?: string; full?: string } : {});
+    setMineruRegions(Array.isArray(layout.regions) ? layout.regions as VisualRegion[] : []);
+    setMineruReady(Boolean(layout.ready));
+    if (Array.isArray(layout.outline) && layout.outline.length) setOutline(layout.outline as OutlineItem[]);
+    setPaperStateLoaded(true);
+    window.setTimeout(() => {
+      libraryHydrating.current = false;
+      const page = typeof state.currentPage === "number" ? state.currentPage : 1;
+      document.getElementById(`pdf-page-${page}`)?.scrollIntoView({ block: "start" });
+    }, 250);
+  }
+  async function persistLibraryState() {
+    if (!session || !currentPaperId || libraryHydrating.current) return;
+    const readerState = {
+      currentPage, scale, highlights, selections, visualSelections: [], messages,
+      summary: { short: summary.short, full: summary.full },
+    };
+    const layoutResult = mineruReady ? { ready: true, regions: mineruRegions, outline } : null;
+    const { error } = await supabase.from("library_paper_states").upsert({
+      paper_id: currentPaperId, user_id: session.user.id, reader_state: readerState, layout_result: layoutResult, updated_at: new Date().toISOString(),
+    });
+    if (error) setLibraryNotice("阅读记录同步失败，将在下次修改时重试。");
+    else await supabase.from("library_papers").update({ last_opened_at: new Date().toISOString() }).eq("id", currentPaperId);
+  }
+  async function openLibraryPaper(paper: LibraryPaper) {
+    try {
+      setLibraryNotice("");
+      const { data, error } = await supabase.storage.from("library-pdfs").createSignedUrl(paper.storage_path, 300);
+      if (error || !data?.signedUrl) throw error || new Error("LIBRARY_URL_FAILED");
+      const response = await fetch(data.signedUrl);
+      if (!response.ok) throw new Error("LIBRARY_DOWNLOAD_FAILED");
+      setLibraryOpen(false);
+      await openPdfData(await response.arrayBuffer(), paper.original_name, { paperId: paper.id, sourceUrl: paper.source_url });
+      const saved = await loadPaperState(paper.id);
+      hydrateLibraryState(saved);
+      await supabase.from("library_papers").update({ last_opened_at: new Date().toISOString() }).eq("id", paper.id);
+    } catch {
+      setLibraryNotice("无法打开这篇文献，请稍后重试。");
+    }
   }
   async function submitAuth() {
     setAuthError("");
@@ -1520,8 +1652,13 @@ function App() {
     return () => window.removeEventListener("keydown", close);
   }, []);
 
-  function beginPdfOpen(name: string) {
+  function beginPdfOpen(name: string, options: { paperId?: string; sourceUrl?: string | null } = {}) {
     setPdfOpening(true);
+    libraryHydrating.current = false;
+    librarySaveAttempted.current = "";
+    setCurrentPaperId(options.paperId || "");
+    setPaperStateLoaded(!options.paperId);
+    importSourceUrl.current = options.sourceUrl || null;
     setSelections([]); setHighlights([]); setVisualSelections([]); setVisualMode(false); setMineruRegions([]); setMineruReady(false); setLayoutState({ state: "idle" }); setLayoutNoticeVisible(false); autoLayoutDocument.current = "";
     setDocumentReady(false); setDocumentText(""); setPdf(null); setOutline([]);
     setFileName(name);
@@ -1563,9 +1700,9 @@ function App() {
       setDocumentReady(true);
     }
   }
-  async function openPdfData(data: ArrayBuffer, name: string) {
+  async function openPdfData(data: ArrayBuffer, name: string, options: { paperId?: string; sourceUrl?: string | null } = {}) {
     try {
-      beginPdfOpen(name);
+      beginPdfOpen(name, options);
       const document = await pdfjsLib.getDocument({ data: new Uint8Array(data) }).promise;
       await finishPdfOpen(document);
     } catch {
@@ -1577,9 +1714,9 @@ function App() {
       setFileName("无法打开该 PDF");
     }
   }
-  async function openPdfRemote(url: URL, name: string) {
+  async function openPdfRemote(url: URL, name: string, options: { paperId?: string } = {}) {
     try {
-      beginPdfOpen(name);
+      beginPdfOpen(name, { ...options, sourceUrl: url.toString() });
       const document = await pdfjsLib.getDocument({ url: url.toString(), withCredentials: false }).promise;
       await finishPdfOpen(document);
     } catch {
@@ -1784,7 +1921,7 @@ function App() {
       }
       const disposition = response.headers.get("content-disposition") || "";
       const name = decodeURIComponent(disposition.match(/filename\*?=(?:UTF-8'')?\"?([^;\"]+)/i)?.[1] || parsed.pathname.split("/").pop() || "在线论文.pdf");
-      await openPdfData(data, name.endsWith(".pdf") ? name : `${name}.pdf`);
+      await openPdfData(data, name.endsWith(".pdf") ? name : `${name}.pdf`, { sourceUrl: parsed.toString() });
       setUrlOpen(false);
       setPaperUrl("");
     } catch (error) {
@@ -2013,6 +2150,8 @@ function App() {
     goToPage(pageIndex + 1);
   }
 
+  if (libraryOpen && session) return <LibraryScreen onClose={() => setLibraryOpen(false)} onOpen={paper => void openLibraryPaper(paper)} />;
+
   if (!pdf) {
     // Both local and URL imports clear the previous document before PDF.js
     // resolves the new one. Keep the loading view mounted during that gap so
@@ -2033,6 +2172,7 @@ function App() {
           onOpenFile={() => fileInput.current?.click()}
           onOpenUrl={() => setUrlOpen(true)}
           onOpenAccount={() => setAuthOpen(true)}
+          onOpenLibrary={() => setLibraryOpen(true)}
         />
         <input ref={fileInput} className="welcome-file-input" type="file" accept="application/pdf" onChange={(event) => event.target.files?.[0] && openFile(event.target.files[0])} />
         {authOpen && (session ? <AccountDialog session={session} usage={usage} onClose={() => setAuthOpen(false)} onSignOut={() => { signOut(); setAuthOpen(false); }} /> : <AuthDialog mode={authMode} email={authEmail} password={authPassword} name={authName} code={authCode} error={authError} notice={authNotice} verifying={authVerifying} onClose={() => setAuthOpen(false)} onSubmit={submitAuth} onVerify={verifyEmailCode} onResend={resendEmailCode} onModeChange={(nextMode) => { setAuthMode(nextMode); setAuthVerifying(false); setAuthError(""); setAuthNotice(""); }} onEmail={setAuthEmail} onPassword={setAuthPassword} onName={setAuthName} onCode={setAuthCode} />)}
@@ -2154,6 +2294,9 @@ function App() {
           <IconButton label="通过 URL 打开 PDF" onClick={() => { setPaperUrl(""); setUrlError(""); setUrlOpen(true); }}>
             <Link size={16} />
           </IconButton>
+          {session && <IconButton label="打开文献库" onClick={() => setLibraryOpen(true)}>
+            <FolderOpen size={17} />
+          </IconButton>}
           <IconButton label="切换全屏" onClick={toggleFullscreen}>
             <Maximize size={17} />
           </IconButton>
@@ -2396,6 +2539,7 @@ function App() {
           </div>
         </aside>
       </main>
+      {libraryNotice && <button className="library-sync-notice" onClick={() => setLibraryNotice("")}>{libraryNotice}</button>}
       {authOpen && (session ? <AccountDialog session={session} usage={usage} onClose={() => setAuthOpen(false)} onSignOut={() => { signOut(); setAuthOpen(false); }} /> : <AuthDialog mode={authMode} email={authEmail} password={authPassword} name={authName} code={authCode} error={authError} notice={authNotice} verifying={authVerifying} onClose={() => setAuthOpen(false)} onSubmit={submitAuth} onVerify={verifyEmailCode} onResend={resendEmailCode} onModeChange={(nextMode) => { setAuthMode(nextMode); setAuthVerifying(false); setAuthError(""); setAuthNotice(""); }} onEmail={setAuthEmail} onPassword={setAuthPassword} onName={setAuthName} onCode={setAuthCode} />)}
       {urlOpen && <UrlImportDialog value={paperUrl} error={urlError} loading={urlLoading} onChange={value => { setPaperUrl(value); setUrlError(""); }} onClose={() => setUrlOpen(false)} onSubmit={openPdfUrl} />}
       {!embeddedReader && <ExtensionAutoOpenToggle />}
