@@ -8,6 +8,11 @@ function escapeHtml(value: string) {
   })[character]!);
 }
 
+function brandedFrom(value: string) {
+  const address = value.match(/<\s*([^>\s]+@[^>\s]+)\s*>/)?.[1] || value.trim();
+  return `史谛 shidea <${address}>`;
+}
+
 Deno.serve(async req => {
   const cors = preflight(req);
   if (cors) return cors;
@@ -40,10 +45,10 @@ Deno.serve(async req => {
       method: "POST",
       headers: { Authorization: `Bearer ${env("RESEND_API_KEY")}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        from: env("RESEND_FROM_EMAIL"),
+        from: brandedFrom(env("RESEND_FROM_EMAIL")),
         to: [email],
-        subject: `${printableCode} 是你的 Inkwise 验证码`,
-        html: `<div style="background:#f5f7f8;padding:32px 16px;font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#17201d"><div style="max-width:480px;margin:auto;background:#fff;border:1px solid #e2e8e5;border-radius:16px;padding:32px"><div style="font-size:18px;font-weight:700;color:#176b51">墨知 Inkwise</div><h1 style="font-size:24px;margin:28px 0 10px">验证你的邮箱</h1><p style="color:#60706a;line-height:1.7">你好，${escapeHtml(username)}。输入以下验证码完成账号注册：</p><div style="font-size:34px;font-weight:750;letter-spacing:8px;text-align:center;background:#eef7f3;color:#155f49;border-radius:12px;padding:20px 12px;margin:24px 0">${printableCode}</div><p style="font-size:13px;color:#84918c;line-height:1.7">验证码将在 10 分钟后失效。若非本人操作，请忽略此邮件。</p></div></div>`,
+        subject: `${printableCode} · 史谛 shidea 邀你开始阅读`,
+        html: `<div style="background:#eef6f5;padding:42px 16px;font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;color:#173047"><div style="max-width:500px;margin:auto;border:1px solid #d7e8e5;border-radius:20px;background:#ffffff;box-shadow:0 18px 48px rgba(6,52,119,.10);padding:36px"><div style="color:#078b8e;font-size:12px;font-weight:800;letter-spacing:2px">SHIDEA · READING SPACE</div><div style="margin-top:12px;color:#063477;font-family:Georgia,'Times New Roman','Songti SC',serif;font-size:27px;line-height:1.25">让每一页阅读，<br/>都通向更清晰的理解。</div><p style="margin:24px 0 0;color:#54707d;font-size:14px;line-height:1.8">你好，${escapeHtml(username)}。欢迎来到史谛 shidea。请使用下面的验证码完成注册，期待和你一起读过那些重要的文献、问题与灵光。</p><div style="margin:26px 0 20px;border:1px solid #bce4df;border-radius:14px;background:#edf9f7;color:#063477;padding:20px 12px;text-align:center;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:34px;font-weight:800;letter-spacing:9px">${printableCode}</div><p style="margin:0;color:#7c9199;font-size:12px;line-height:1.7">验证码将在 10 分钟后失效。若不是你发起的注册，可以安心忽略这封邮件。</p><div style="height:1px;margin:24px 0 16px;background:#e5efed"></div><div style="color:#078b8e;font-size:13px;font-weight:700">史谛 shidea</div><div style="margin-top:4px;color:#8a9ca3;font-size:11px">与你一起，把阅读变成自己的思想地图。</div></div></div>`,
       }),
     });
     if (!resendResponse.ok) {

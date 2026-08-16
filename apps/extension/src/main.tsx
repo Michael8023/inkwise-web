@@ -412,6 +412,18 @@ const apiErrors: Record<string, string> = {
   PDF_URL_FETCH_FAILED: "PDF 获取失败，请检查链接或稍后重试。",
 };
 function readableApiError(error: unknown, fallback: string) { const code=error instanceof Error?error.message:String(error||""); return apiErrors[code]||fallback; }
+function librarySaveError(error: unknown, stage: "检查重复" | "上传 PDF" | "创建文献记录") {
+  const message = error instanceof Error
+    ? error.message
+    : error && typeof error === "object" && "message" in error && typeof error.message === "string"
+      ? error.message
+      : "";
+  if (/row-level security|permission denied|jwt|auth/i.test(message)) return `${stage}失败：登录状态或存储权限已失效，请重新登录后重试。`;
+  if (/bucket.*not found|bucket.*does not exist/i.test(message)) return "上传 PDF 失败：文献库存储空间尚未配置完成。";
+  if (/duplicate key|unique constraint/i.test(message)) return "创建文献记录失败：这篇文献已存在，请刷新文献库后重试。";
+  if (/file.*size|too large/i.test(message)) return "上传 PDF 失败：文件超过文献库允许的大小。";
+  return message ? `${stage}失败：${message.slice(0, 140)}` : `${stage}失败：服务未返回具体原因，请稍后重试。`;
+}
 
 function AuthDialog({
   mode, email, password, name, code, error, notice, verifying, busy, busyLabel, onClose, onSubmit, onVerify, onResend, onModeChange, onEmail, onPassword, onName, onCode,
@@ -1620,6 +1632,7 @@ function App() {
       showNotice("该 PDF 超过 Supabase Free 的 50 MB 上限，已在本次阅读中打开，但未保存到文献库。", "info");
       return;
     }
+    let stage: "检查重复" | "上传 PDF" | "创建文献记录" = "检查重复";
     try {
       const bytes = pdfBytes.current;
       const hash = await contentHash(bytes);
@@ -1640,12 +1653,14 @@ function App() {
       const title = detectedDocumentTitle.current || documentTitle || fileName.replace(/\.pdf$/i, "") || "未命名文献";
       const id = crypto.randomUUID();
       const storagePath = `${session.user.id}/${id}.pdf`;
+      stage = "上传 PDF";
       const { error: uploadError } = await supabase.storage.from("library-pdfs").upload(
         storagePath,
         new Blob([bytes], { type: "application/pdf" }),
         { contentType: "application/pdf", upsert: false },
       );
       if (uploadError) throw uploadError;
+      stage = "创建文献记录";
       const { error: insertError } = await supabase.from("library_papers").insert({
         id,
         user_id: session.user.id,
@@ -1665,7 +1680,8 @@ function App() {
       setCurrentPaperId(id);
       showNotice("已安全保存到你的文献库。", "success");
     } catch (error) {
-      showNotice(`文献库保存失败：${readableApiError(error, "请稍后重试。")}`, "error");
+      console.error("Library archive failed", { stage, error });
+      showNotice(librarySaveError(error, stage), "error");
     }
   }
   async function addCurrentDocumentToLibrary() {
