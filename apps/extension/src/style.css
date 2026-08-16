@@ -418,7 +418,27 @@ button {
 .art-lines { display: grid; gap: 8px; margin-top: 30px; }
 .art-lines i { height: 5px; background: #d9dbe2; }
 .art-lines i:nth-child(1) { width: 89%; }.art-lines i:nth-child(2) { width: 96%; }.art-lines i:nth-child(3) { width: 72%; }.art-lines i:nth-child(4) { width: 82%; }
-.art-highlight { margin-top: 24px; padding: 10px 11px; background: #d8f5f1; color: #063477; font-size: 12px; line-height: 1.55; }
+.art-highlight {
+  margin-top: 24px;
+  padding: 8px 12px 10px;
+  background: #d8f5f1;
+  color: #063477;
+  font-family: "Brush Script MT", "Segoe Script", "Snell Roundhand", cursive;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.18;
+  letter-spacing: .01em;
+}
+.art-highlight-initial {
+  display: inline-block;
+  margin: 0 -1px -7px -3px;
+  color: #057c80;
+  font-size: 43px;
+  font-weight: 700;
+  line-height: .72;
+  text-shadow: 1px 2px 0 rgb(255 255 255 / .52);
+  transform: rotate(-7deg);
+}
 .art-highlight strong { color: #078b8e; font-weight: 800; }
 .art-footer { display: flex; justify-content: space-between; margin-top: auto; color: #8c92a1; font-size: 9px; font-weight: 700; letter-spacing: 1px; }
 .welcome-marker { position: absolute; right: 2px; top: 10px; display: grid; place-items: center; width: 60px; height: 60px; border: 1px solid #b9e2de; border-radius: 50%; background: #fff; color: #078b8e; font-size: 24px; box-shadow: 0 8px 24px rgb(6 52 119 / .16); }
