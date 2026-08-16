@@ -1350,6 +1350,7 @@ function App() {
   const importSourceUrl = useRef<string | null>(null);
   const libraryHydrating = useRef(false);
   const librarySaveAttempted = useRef("");
+  const restoredReaderFor = useRef<string | null>(null);
   const autoLayoutDocument = useRef("");
   const fileInput = useRef<HTMLInputElement>(null);
   const [documentId, setDocumentId] = useState("");
@@ -1498,8 +1499,31 @@ function App() {
     refreshUsage();
   }, [session]);
   useEffect(() => {
-    if (session && currentPaperId) window.localStorage.setItem(`shidea-last-paper:${session.user.id}`, currentPaperId);
+    if (!session || !currentPaperId) return;
+    window.localStorage.setItem(`shidea-last-paper:${session.user.id}`, currentPaperId);
+    // Keep refresh recovery scoped to this browser tab. This preserves the
+    // welcome page for ordinary visits while letting an active reader survive
+    // a page reload.
+    window.sessionStorage.setItem(`shidea-active-paper:${session.user.id}`, currentPaperId);
   }, [session, currentPaperId]);
+  useEffect(() => {
+    if (nativePdfView || !session || pdf || restoredReaderFor.current === session.user.id) return;
+    restoredReaderFor.current = session.user.id;
+    const paperId = window.sessionStorage.getItem(`shidea-active-paper:${session.user.id}`);
+    if (!paperId) return;
+    void (async () => {
+      const { data, error } = await supabase
+        .from("library_papers")
+        .select("id, folder_id, title, original_name, source_url, storage_path, file_size, page_count, archived_at, last_opened_at, created_at, is_favorite")
+        .eq("id", paperId)
+        .maybeSingle();
+      if (error || !data) {
+        window.sessionStorage.removeItem(`shidea-active-paper:${session.user.id}`);
+        return;
+      }
+      await openLibraryPaper(data as LibraryPaper);
+    })();
+  }, [session, pdf, nativePdfView]);
   useEffect(() => {
     if (!session || !pdf || !documentReady || currentPaperId || librarySaveAttempted.current === documentId) return;
     librarySaveAttempted.current = documentId;
@@ -1740,6 +1764,7 @@ function App() {
     } catch (error) { const message=error instanceof Error?error.message:"EMAIL_SEND_FAILED"; setAuthError(apiErrors[message] || message); }
   }
   async function signOut() {
+    if (session) window.sessionStorage.removeItem(`shidea-active-paper:${session.user.id}`);
     setSession(null); setUsage(null);
     await supabase.auth.signOut();
   }
@@ -1753,6 +1778,7 @@ function App() {
 
   function beginPdfOpen(name: string, options: { paperId?: string; sourceUrl?: string | null } = {}) {
     setPdfOpening(true);
+    if (session) window.sessionStorage.removeItem(`shidea-active-paper:${session.user.id}`);
     libraryHydrating.current = false;
     librarySaveAttempted.current = "";
     setCurrentPaperId(options.paperId || "");
