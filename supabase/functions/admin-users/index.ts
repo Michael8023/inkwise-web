@@ -163,7 +163,11 @@ Deno.serve(async req => {
     }
     return json({ error: "METHOD_NOT_ALLOWED" }, 405);
   } catch (error) {
-    const raw = error instanceof Error ? error.message : "ADMIN_REQUEST_FAILED";
+    const raw = error instanceof Error
+      ? error.message
+      : error && typeof error === "object" && "message" in error && typeof error.message === "string"
+        ? error.message
+        : "ADMIN_REQUEST_FAILED";
     const message = raw.includes("ADMIN_REQUIRED") ? "ADMIN_REQUIRED" : raw;
     console.error("Admin request failed", message);
     return json({ error: message }, statusFor(message));

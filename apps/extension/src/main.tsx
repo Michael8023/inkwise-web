@@ -70,6 +70,7 @@ type Selection = {
   task?: Task;
   note?: string;
   popoverClosed?: boolean;
+  popoverCollapsed?: boolean;
 };
 type SavedHighlight = Omit<Selection, "task" | "offsetX" | "offsetY" | "note" | "popoverClosed"> & { color: string };
 type VisualSelection = {
@@ -412,23 +413,24 @@ const apiErrors: Record<string, string> = {
 function readableApiError(error: unknown, fallback: string) { const code=error instanceof Error?error.message:String(error||""); return apiErrors[code]||fallback; }
 
 function AuthDialog({
-  mode, email, password, name, code, error, notice, verifying, onClose, onSubmit, onVerify, onResend, onModeChange, onEmail, onPassword, onName, onCode,
+  mode, email, password, name, code, error, notice, verifying, busy, busyLabel, onClose, onSubmit, onVerify, onResend, onModeChange, onEmail, onPassword, onName, onCode,
 }: {
   mode: "login" | "register"; email: string; password: string; name: string; code: string; error: string; notice: string; verifying: boolean;
+  busy: boolean; busyLabel: string;
   onClose: () => void; onSubmit: () => void; onVerify: () => void; onResend: () => void; onModeChange: (mode: "login" | "register") => void;
   onEmail: (value: string) => void; onPassword: (value: string) => void; onName: (value: string) => void; onCode: (value: string) => void;
 }) {
-  return <div className="auth-backdrop"><form className="auth-dialog" onSubmit={(event) => { event.preventDefault(); verifying ? onVerify() : onSubmit(); }}>
-    <button type="button" className="popover-close" onClick={onClose}><X size={16} /></button>
+  return <div className="auth-backdrop"><form className={`auth-dialog${busy ? " is-busy" : ""}`} aria-busy={busy} onSubmit={(event) => { event.preventDefault(); if (!busy) verifying ? onVerify() : onSubmit(); }}>
+    <button type="button" className="popover-close" onClick={onClose} disabled={busy}><X size={16} /></button>
     <div className="auth-brand"><img src="/brand/shidea-mark.png" alt="" /><span>识谛 <em>shidea</em></span></div>
     <div className="auth-heading"><h2>{verifying ? "验证你的邮箱" : mode === "login" ? "欢迎回来" : "创建你的阅读空间"}</h2></div>
-    {verifying ? <div className="auth-fields verification-fields"><p>验证码已发送至 <strong>{email}</strong></p><label>六位验证码<input className="verification-code" inputMode="numeric" autoComplete="one-time-code" autoFocus placeholder="000000" required minLength={6} maxLength={6} value={code} onChange={(event) => onCode(event.target.value.replace(/\D/g, "").slice(0, 6))} /></label><button className="auth-inline-action" type="button" onClick={onResend}>重新发送验证码</button></div> : <><div className="auth-tabs" role="tablist"><button className={mode === "login" ? "active" : ""} type="button" onClick={() => onModeChange("login")}>登录</button><button className={mode === "register" ? "active" : ""} type="button" onClick={() => onModeChange("register")}>注册</button></div><div className="auth-fields">
-      {mode === "register" && <label>用户名<input placeholder="至少 3 个字符" required minLength={3} value={name} onChange={(event) => onName(event.target.value)} /></label>}
-      <label>邮箱<input type="email" placeholder="name@example.com" required autoComplete="email" value={email} onChange={(event) => onEmail(event.target.value)} /></label>
-      <label>密码<input type="password" placeholder="至少 8 位" required minLength={8} autoComplete={mode === "login" ? "current-password" : "new-password"} value={password} onChange={(event) => onPassword(event.target.value)} /></label>
+    {verifying ? <div className="auth-fields verification-fields"><p>验证码已发送至 <strong>{email}</strong></p><label>六位验证码<input disabled={busy} className="verification-code" inputMode="numeric" autoComplete="one-time-code" autoFocus placeholder="000000" required minLength={6} maxLength={6} value={code} onChange={(event) => onCode(event.target.value.replace(/\D/g, "").slice(0, 6))} /></label><button className="auth-inline-action" type="button" disabled={busy} onClick={onResend}>重新发送验证码</button></div> : <><div className="auth-tabs" role="tablist"><button disabled={busy} className={mode === "login" ? "active" : ""} type="button" onClick={() => onModeChange("login")}>登录</button><button disabled={busy} className={mode === "register" ? "active" : ""} type="button" onClick={() => onModeChange("register")}>注册</button></div><div className="auth-fields">
+      {mode === "register" && <label>用户名<input disabled={busy} placeholder="至少 3 个字符" required minLength={3} value={name} onChange={(event) => onName(event.target.value)} /></label>}
+      <label>邮箱<input disabled={busy} type="email" placeholder="name@example.com" required autoComplete="email" value={email} onChange={(event) => onEmail(event.target.value)} /></label>
+      <label>密码<input disabled={busy} type="password" placeholder="至少 8 位" required minLength={8} autoComplete={mode === "login" ? "current-password" : "new-password"} value={password} onChange={(event) => onPassword(event.target.value)} /></label>
     </div></>}
     {error && <p className="auth-feedback error">{error}</p>}{notice && <p className="auth-feedback auth-notice">{notice}</p>}
-    <button className="auth-submit" type="submit">{verifying ? "完成验证" : mode === "login" ? "登录识谛" : "发送验证码"}<ChevronRight size={17} /></button>
+    <button className="auth-submit" type="submit" disabled={busy}>{busy ? <><RefreshCw className="auth-spinner" size={17} />{busyLabel}</> : <>{verifying ? "完成验证" : mode === "login" ? "登录识谛" : "发送验证码"}<ChevronRight size={17} /></>}</button>
   </form></div>;
 }
 
@@ -768,6 +770,7 @@ function SelectionPopover({
   onMove,
   onHighlight,
   onNote,
+  onCollapse,
 }: {
   selection: Selection;
   pageRef: React.RefObject<HTMLDivElement | null>;
@@ -777,12 +780,14 @@ function SelectionPopover({
   onMove: (id: string, offsetX: number, offsetY: number) => void;
   onHighlight: (id: string, color: string) => void;
   onNote: (selection: Selection) => void;
+  onCollapse: (id: string, collapsed: boolean) => void;
 }) {
   const popoverRef = useRef<HTMLDivElement>(null);
   const dragStart = useRef<{ x: number; y: number; offsetX: number; offsetY: number } | null>(null);
   const [position, setPosition] = useState({ left: -9999, top: -9999 });
   const [followup, setFollowup] = useState("");
-  const [collapsed, setCollapsed] = useState(false);
+  const collapsed = Boolean(selection.popoverCollapsed);
+  const [anchor, setAnchor] = useState({ left: -9999, top: -9999 });
 
   useLayoutEffect(() => {
     const updatePosition = () => {
@@ -795,6 +800,7 @@ function SelectionPopover({
       const margin = 12;
       const anchorX = pageRect.left + pageRect.width * selection.nx;
       const anchorY = pageRect.top + pageRect.height * selection.ny;
+      setAnchor({ left: anchorX, top: anchorY });
       const desiredLeft = anchorX - width / 2 + (selection.offsetX || 0);
       const desiredTop = anchorY + 10 + (selection.offsetY || 0);
       const maxLeft = Math.max(margin, window.innerWidth - width - margin);
@@ -819,7 +825,7 @@ function SelectionPopover({
       window.removeEventListener("resize", updatePosition);
       observer.disconnect();
     };
-  }, [pageRef, selection.nx, selection.ny, selection.offsetX, selection.offsetY, selection.task]);
+  }, [pageRef, selection.nx, selection.ny, selection.offsetX, selection.offsetY, selection.task, selection.popoverCollapsed]);
 
   function startDrag(event: React.PointerEvent<HTMLButtonElement>) {
     event.preventDefault();
@@ -847,7 +853,8 @@ function SelectionPopover({
     dragStart.current = null;
   }
 
-  return (
+  return <>
+    {selection.task?.kind === "explain" && <svg className="selection-connector" aria-hidden="true"><line x1={anchor.left} y1={anchor.top} x2={position.left + 18} y2={position.top + 18} /></svg>}
     <div
       ref={popoverRef}
       className={`selection-popover${collapsed ? " collapsed" : ""}`}
@@ -861,11 +868,11 @@ function SelectionPopover({
         className="popover-collapse"
         aria-label={collapsed ? "展开浮窗" : "折叠浮窗"}
         title={collapsed ? "展开" : "折叠"}
-        onClick={() => setCollapsed(value => !value)}
+        onClick={() => onCollapse(selection.id, !collapsed)}
       >
         <ChevronDown size={15} />
       </button>
-      {!collapsed && <button
+      <button
         className="popover-drag-handle"
         aria-label="拖动浮窗"
         title="拖动浮窗"
@@ -875,7 +882,7 @@ function SelectionPopover({
         onPointerCancel={stopDrag}
       >
         <GripVertical size={15} />
-      </button>}
+      </button>
       <button
         className="popover-close"
         aria-label="关闭选区"
@@ -887,7 +894,6 @@ function SelectionPopover({
       <div className="popover-collapsed-title">{selection.text}</div>
       {!collapsed && <><p className="popover-text">{selection.text}</p>
       <div className="popover-actions">
-        <button onClick={() => onTask(selection, "translate")} disabled={selection.task?.state === "loading"}>译 翻译</button>
         <button onClick={() => onTask(selection, "explain")} disabled={selection.task?.state === "loading"}>✦ 解释</button>
         <button onClick={() => onNote(selection)}><StickyNote size={14} /> 笔记</button>
       </div>
@@ -907,7 +913,7 @@ function SelectionPopover({
       )}
       </>}
     </div>
-  );
+  </>;
 }
 
 function VisualPopover({ selection, pageRef, onClose, onTask, onFollowup }: {
@@ -964,6 +970,8 @@ function PageView({
   onMove,
   onHighlight,
   onNote,
+  onCollapse,
+  onBlurSelections,
   onDeleteHighlight,
   visualMode,
   visualSelections,
@@ -988,6 +996,8 @@ function PageView({
   onMove: (id: string, offsetX: number, offsetY: number) => void;
   onHighlight: (id: string, color: string) => void;
   onNote: (selection: Selection) => void;
+  onCollapse: (id: string, collapsed: boolean) => void;
+  onBlurSelections: () => void;
   onDeleteHighlight: (id: string) => void;
   visualMode: boolean;
   visualSelections: VisualSelection[];
@@ -1254,7 +1264,7 @@ function PageView({
         }}
         onMouseUp={selectText}
         onMouseMove={detectHighlight}
-        onPointerDown={beginVisualSelection}
+        onPointerDown={(event) => { if (!visualMode) onBlurSelections(); beginVisualSelection(event); }}
         onPointerMove={moveVisualSelection}
         onPointerUp={finishVisualSelection}
         onPointerCancel={() => setVisualDraft(null)}
@@ -1310,6 +1320,7 @@ function PageView({
             onMove={onMove}
             onHighlight={onHighlight}
             onNote={onNote}
+            onCollapse={onCollapse}
           />
         ))}
         {visualSelections.map(selection => <VisualPopover key={selection.id} selection={selection} pageRef={hostRef} onClose={onVisualClose} onTask={onVisualTask} onFollowup={onVisualFollowup}/>)}
@@ -1388,6 +1399,8 @@ function App() {
   const [authError, setAuthError] = useState("");
   const [authCode, setAuthCode] = useState("");
   const [authVerifying, setAuthVerifying] = useState(false);
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authBusyLabel, setAuthBusyLabel] = useState("");
   const [urlOpen, setUrlOpen] = useState(false);
   const [paperUrl, setPaperUrl] = useState("");
   const [urlLoading, setUrlLoading] = useState(() => {
@@ -1705,6 +1718,8 @@ function App() {
   async function submitAuth() {
     setAuthError("");
     setAuthNotice("");
+    setAuthBusy(true);
+    setAuthBusyLabel(authMode === "register" ? "正在发送验证码…" : "正在登录…");
     try {
       if (!supabaseConfigured) throw new Error("SUPABASE_NOT_CONFIGURED");
       if (authMode === "register") {
@@ -1724,17 +1739,22 @@ function App() {
         if (error) throw error;
         // Do not wait for the asynchronous auth-state event: otherwise the
         // reader can briefly stay in its logged-out UI after a successful login.
-        if (data.session) setSession(data.session as AuthSession);
+      if (data.session) setSession(data.session as AuthSession);
       }
       setAuthOpen(false);
       setAuthPassword("");
+      window.setTimeout(() => window.location.reload(), 180);
     } catch (error) {
       const message = error instanceof Error ? error.message : "REQUEST_FAILED";
       setAuthError(apiErrors[message] || message);
+    } finally {
+      setAuthBusy(false);
+      setAuthBusyLabel("");
     }
   }
   async function verifyEmailCode() {
     setAuthError(""); setAuthNotice("");
+    setAuthBusy(true); setAuthBusyLabel("正在完成验证…");
     try {
       if (authCode.length !== 6) throw new Error("请输入六位验证码。");
       const response = await functionRequest("complete-signup", {
@@ -1748,10 +1768,13 @@ function App() {
       if (error) throw error;
       if (signInData.session) setSession(signInData.session as AuthSession);
       setAuthOpen(false); setAuthVerifying(false); setAuthCode(""); setAuthPassword("");
+      window.setTimeout(() => window.location.reload(), 180);
     } catch (error) { const message=error instanceof Error?error.message:"SIGNUP_FAILED"; setAuthError(apiErrors[message] || message); }
+    finally { setAuthBusy(false); setAuthBusyLabel(""); }
   }
   async function resendEmailCode() {
     setAuthError(""); setAuthNotice("");
+    setAuthBusy(true); setAuthBusyLabel("正在重新发送…");
     try {
       const response = await functionRequest("request-signup-code", {
         method: "POST",
@@ -1762,6 +1785,7 @@ function App() {
       if (!response.ok) throw new Error(result.error || "EMAIL_SEND_FAILED");
       setAuthNotice("新的验证码已发送，请查收邮箱。");
     } catch (error) { const message=error instanceof Error?error.message:"EMAIL_SEND_FAILED"; setAuthError(apiErrors[message] || message); }
+    finally { setAuthBusy(false); setAuthBusyLabel(""); }
   }
   async function signOut() {
     if (session) window.sessionStorage.removeItem(`shidea-active-paper:${session.user.id}`);
@@ -2105,6 +2129,7 @@ function App() {
     const next = { ...selection, id, highlightColor: highlightMode ? "#f4cf4d" : undefined };
     setSelections((items) => [...items, next]);
     if (highlightMode) persistHighlight(next);
+    void runTask(next, "translate");
   }
   function addVisualSelection(selection: Omit<VisualSelection, "id">) {
     const next = { ...selection, id: crypto.randomUUID() };
@@ -2184,7 +2209,7 @@ function App() {
   }
   function updateTask(id: string, task: Task) {
     setSelections((items) =>
-      items.map((item) => (item.id === id ? { ...item, task } : item)),
+      items.map((item) => (item.id === id ? { ...item, task, popoverCollapsed: task.kind === "explain" ? false : item.popoverCollapsed } : item)),
     );
   }
   function moveSelection(id: string, offsetX: number, offsetY: number) {
@@ -2193,6 +2218,15 @@ function App() {
         item.id === id ? { ...item, offsetX, offsetY } : item,
       ),
     );
+  }
+  function collapseSelection(id: string, popoverCollapsed: boolean) {
+    setSelections(items => items.map(item => item.id === id ? { ...item, popoverCollapsed } : item));
+  }
+  function blurSelections() {
+    setSelections(items => items.flatMap<Selection>(item => {
+      if (item.task?.kind === "explain") return [{ ...item, popoverCollapsed: true }];
+      return item.note?.trim() ? [{ ...item, popoverClosed: true }] : [];
+    }));
   }
   function openNote(selection: Selection) {
     setPanelOpen(true);
@@ -2348,7 +2382,7 @@ function App() {
           onOpenAccount={() => setAuthOpen(true)}
         />
         <input ref={fileInput} className="welcome-file-input" type="file" accept="application/pdf" onChange={(event) => event.target.files?.[0] && openFile(event.target.files[0])} />
-        {authOpen && (session ? <AccountDialog session={session} usage={usage} onClose={() => setAuthOpen(false)} onSignOut={() => { signOut(); setAuthOpen(false); }} onOpenLibrary={() => { setAuthOpen(false); setLibraryOpen(true); }} /> : <AuthDialog mode={authMode} email={authEmail} password={authPassword} name={authName} code={authCode} error={authError} notice={authNotice} verifying={authVerifying} onClose={() => setAuthOpen(false)} onSubmit={submitAuth} onVerify={verifyEmailCode} onResend={resendEmailCode} onModeChange={(nextMode) => { setAuthMode(nextMode); setAuthVerifying(false); setAuthError(""); setAuthNotice(""); }} onEmail={setAuthEmail} onPassword={setAuthPassword} onName={setAuthName} onCode={setAuthCode} />)}
+        {authOpen && (session ? <AccountDialog session={session} usage={usage} onClose={() => setAuthOpen(false)} onSignOut={() => { signOut(); setAuthOpen(false); }} onOpenLibrary={() => { setAuthOpen(false); setLibraryOpen(true); }} /> : <AuthDialog mode={authMode} email={authEmail} password={authPassword} name={authName} code={authCode} error={authError} notice={authNotice} verifying={authVerifying} busy={authBusy} busyLabel={authBusyLabel} onClose={() => setAuthOpen(false)} onSubmit={submitAuth} onVerify={verifyEmailCode} onResend={resendEmailCode} onModeChange={(nextMode) => { setAuthMode(nextMode); setAuthVerifying(false); setAuthError(""); setAuthNotice(""); }} onEmail={setAuthEmail} onPassword={setAuthPassword} onName={setAuthName} onCode={setAuthCode} />)}
         {urlOpen && <UrlImportDialog value={paperUrl} error={urlError} loading={urlLoading} onChange={value => { setPaperUrl(value); setUrlError(""); }} onClose={() => setUrlOpen(false)} onSubmit={openPdfUrl} />}
         {!embeddedReader && <ExtensionAutoOpenToggle />}
       </div>
@@ -2375,6 +2409,8 @@ function App() {
               onMove={() => {}}
               onHighlight={() => {}}
               onNote={() => {}}
+              onCollapse={() => {}}
+              onBlurSelections={() => {}}
               onDeleteHighlight={() => {}}
               visualMode={false}
               visualSelections={[]}
@@ -2444,9 +2480,9 @@ function App() {
                 <Plus size={16} />
               </IconButton>
             </div>
-            <IconButton label={visualMode ? "退出图片/表格框选" : "框选图片或表格"} active={visualMode} onClick={() => { setVisualMode(value => !value); setSelections([]); }}>
-              <Crop size={19} strokeWidth={2.5} />
-            </IconButton>
+            <button className={`visual-tool-trigger${visualMode ? " active" : ""}`} aria-label={visualMode ? "退出 AI 识图" : "AI 识图：拖动鼠标框选图片或表格"} title={visualMode ? "退出 AI 识图" : "悬浮后拖动鼠标框选图片或表格"} onClick={() => { setVisualMode(value => !value); setSelections([]); }}>
+              <span className="visual-tool-icon"><Crop size={19} strokeWidth={2.5} /><i className={mineruReady ? "ready" : "pending"} /></span><span>AI 识图</span>
+            </button>
             <IconButton label="智能版面分析" onClick={runMineruLayout} active={layoutState.state === "processing"}>
               <ScanSearch size={17} />
             </IconButton>
@@ -2528,6 +2564,8 @@ function App() {
                   onMove={moveSelection}
                   onHighlight={highlightSelection}
                   onNote={openNote}
+                  onCollapse={collapseSelection}
+                  onBlurSelections={blurSelections}
                   onDeleteHighlight={(id) => setHighlights((items) => items.filter((item) => item.id !== id))}
                   highlights={highlights.filter((item) => item.pageNumber === index + 1)}
                   visualMode={visualMode}
@@ -2710,7 +2748,7 @@ function App() {
         </aside>
       </main>
       <NoticeStack notices={notices} onDismiss={dismissNotice}/>
-      {authOpen && (session ? <AccountDialog session={session} usage={usage} onClose={() => setAuthOpen(false)} onSignOut={() => { signOut(); setAuthOpen(false); }} onOpenLibrary={() => { setAuthOpen(false); setLibraryOpen(true); }} /> : <AuthDialog mode={authMode} email={authEmail} password={authPassword} name={authName} code={authCode} error={authError} notice={authNotice} verifying={authVerifying} onClose={() => setAuthOpen(false)} onSubmit={submitAuth} onVerify={verifyEmailCode} onResend={resendEmailCode} onModeChange={(nextMode) => { setAuthMode(nextMode); setAuthVerifying(false); setAuthError(""); setAuthNotice(""); }} onEmail={setAuthEmail} onPassword={setAuthPassword} onName={setAuthName} onCode={setAuthCode} />)}
+      {authOpen && (session ? <AccountDialog session={session} usage={usage} onClose={() => setAuthOpen(false)} onSignOut={() => { signOut(); setAuthOpen(false); }} onOpenLibrary={() => { setAuthOpen(false); setLibraryOpen(true); }} /> : <AuthDialog mode={authMode} email={authEmail} password={authPassword} name={authName} code={authCode} error={authError} notice={authNotice} verifying={authVerifying} busy={authBusy} busyLabel={authBusyLabel} onClose={() => setAuthOpen(false)} onSubmit={submitAuth} onVerify={verifyEmailCode} onResend={resendEmailCode} onModeChange={(nextMode) => { setAuthMode(nextMode); setAuthVerifying(false); setAuthError(""); setAuthNotice(""); }} onEmail={setAuthEmail} onPassword={setAuthPassword} onName={setAuthName} onCode={setAuthCode} />)}
       {urlOpen && <UrlImportDialog value={paperUrl} error={urlError} loading={urlLoading} onChange={value => { setPaperUrl(value); setUrlError(""); }} onClose={() => setUrlOpen(false)} onSubmit={openPdfUrl} />}
       {!embeddedReader && <ExtensionAutoOpenToggle />}
     </div>
