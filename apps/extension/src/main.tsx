@@ -863,6 +863,7 @@ function SelectionPopover({
       ref={popoverRef}
       className={`selection-popover${collapsed ? " collapsed" : ""}`}
       style={position}
+      onPointerDown={(event) => event.stopPropagation()}
       onMouseDown={(event) => event.stopPropagation()}
       onMouseUp={(event) => event.stopPropagation()}
       role="dialog"
