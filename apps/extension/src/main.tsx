@@ -108,6 +108,36 @@ async function contentHash(bytes: ArrayBuffer) {
   return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
 }
 
+function normalizeDocumentTitle(value: unknown): string | null {
+  const title = String(value || "").replace(/[\u0000-\u001f]/g, " ").replace(/\s+/g, " ").trim();
+  if (title.length < 3 || title.length > 500) return null;
+  if (/^(?:untitled|unknown|document|microsoft word|none|null)$/i.test(title)) return null;
+  return title;
+}
+
+async function inferFirstPageTitle(document: any): Promise<string | null> {
+  try {
+    const page = await document.getPage(1);
+    const viewport = page.getViewport({ scale: 1 });
+    const content = await page.getTextContent();
+    type Fragment = { text: string; x: number; y: number; size: number };
+    const fragments: Fragment[] = content.items.map((item: any) => ({
+      text: String(item.str || "").replace(/\s+/g, " ").trim(), x: Number(item.transform?.[4] || 0), y: Number(item.transform?.[5] || 0),
+      size: Math.max(Math.abs(Number(item.transform?.[3] || 0)), Number(item.height || 0), 1),
+    })).filter((item: Fragment) => item.text);
+    const lines: Array<{ text: string; y: number; size: number }> = [];
+    for (const fragment of [...fragments].sort((a, b) => b.y - a.y || a.x - b.x)) {
+      const line = lines.find(item => Math.abs(item.y - fragment.y) <= Math.max(3, fragment.size * .45));
+      if (line) { line.text += `${line.text && !/[\s-]$/.test(line.text) ? " " : ""}${fragment.text}`; line.size = Math.max(line.size, fragment.size); }
+      else lines.push({ text: fragment.text, y: fragment.y, size: fragment.size });
+    }
+    const candidates = lines.map(line => ({ ...line, text: normalizeDocumentTitle(line.text) })).filter((line): line is { text: string; y: number; size: number } => Boolean(line.text))
+      .filter(line => line.y > viewport.height * .34 && !/^(?:arxiv|doi\b|submitted|accepted|abstract\b|keywords?\b)/i.test(line.text));
+    candidates.sort((a, b) => (b.size * 8 + b.y / viewport.height * 2 + Math.min(b.text.length, 120) / 120) - (a.size * 8 + a.y / viewport.height * 2 + Math.min(a.text.length, 120) / 120));
+    return candidates[0]?.text || null;
+  } catch { return null; }
+}
+
 function modelBrand(modelId: string) {
   const value = modelId.toLowerCase();
   if (/claude|anthropic/.test(value)) return { src: "/brand/models/anthropic.svg", alt: "Claude" };
@@ -328,8 +358,10 @@ function collectMineruDocumentTitle(values: unknown[], pageCount: number): strin
     // block. Section headings may also use title-like labels, so favour an
     // explicit document title, then the highest level title closest to top.
     const explicitDocumentTitle = /(?:^|[_\s-])(?:doc|document)[_\s-]*title(?:$|[_\s-])/.test(type);
-    const pageOneTitle = page === 0 && /title/.test(type) && (!Number.isFinite(level) || level <= 1);
-    if (text.length >= 3 && text.length <= 500 && (explicitDocumentTitle || pageOneTitle) && page >= 0 && page < pageCount) {
+    const firstPage = page === 0 || page === 1;
+    const pageOneTitle = firstPage && /title/.test(type) && (!Number.isFinite(level) || level <= 1);
+    const highLevelFirstPageText = firstPage && Number.isFinite(level) && level <= 1;
+    if (text.length >= 3 && text.length <= 500 && (explicitDocumentTitle || pageOneTitle || highLevelFirstPageText) && page >= 0 && page <= pageCount) {
       const box = mineruBox(node.bbox || node.box || node.bounding_box || node.poly);
       candidates.push({ text, rank: explicitDocumentTitle ? 0 : 1, top: box?.[1] ?? Number.MAX_SAFE_INTEGER });
     }
@@ -1302,6 +1334,7 @@ function App() {
   const [mineruReady, setMineruReady] = useState(false);
   const [layoutState, setLayoutState] = useState<LayoutState>({ state: "idle" });
   const pdfBytes = useRef<ArrayBuffer | null>(null);
+  const detectedDocumentTitle = useRef("");
   const importSourceUrl = useRef<string | null>(null);
   const libraryHydrating = useRef(false);
   const librarySaveAttempted = useRef("");
@@ -1467,7 +1500,9 @@ function App() {
   }, [session, currentPaperId, documentReady, paperStateLoaded, currentPage, scale, highlights, selections, visualSelections, mineruRegions, mineruReady, documentTitle, outline, summary, messages]);
   useEffect(() => {
     if (!session || !currentPaperId || !documentTitle) return;
-    void supabase.from("library_papers").update({ title: documentTitle.slice(0, 500) }).eq("id", currentPaperId);
+    void supabase.from("library_papers").update({ title: documentTitle.slice(0, 500) }).eq("id", currentPaperId).then(({ error }) => {
+      if (error) showNotice("文章标题同步失败，将在下次打开时重试。", "error");
+    });
   }, [session, currentPaperId, documentTitle]);
   useEffect(() => {
     if (nativePdfView || !session || !documentReady || !documentId || !paperStateLoaded || mineruReady || autoLayoutDocument.current === documentId) return;
@@ -1519,6 +1554,12 @@ function App() {
     setNotices(items => [...items, { id, message, tone }]);
     window.setTimeout(() => dismissNotice(id), 1820);
   }
+  function setDetectedDocumentTitle(value: unknown, replace = false) {
+    const title = normalizeDocumentTitle(value);
+    if (!title || (!replace && detectedDocumentTitle.current)) return;
+    detectedDocumentTitle.current = title;
+    setDocumentTitle(title);
+  }
   async function archiveCurrentDocument() {
     if (!session || !pdf || !pdfBytes.current) return;
     if (pdfBytes.current.byteLength > MAX_LIBRARY_PDF_BYTES) {
@@ -1541,7 +1582,7 @@ function App() {
         hydrateLibraryState(saved);
         return;
       }
-      const title = fileName.replace(/\.pdf$/i, "") || "未命名文献";
+      const title = detectedDocumentTitle.current || documentTitle || fileName.replace(/\.pdf$/i, "") || "未命名文献";
       const id = crypto.randomUUID();
       const storagePath = `${session.user.id}/${id}.pdf`;
       const { error: uploadError } = await supabase.storage.from("library-pdfs").upload(
@@ -1586,7 +1627,7 @@ function App() {
     setSummary(state.summary && typeof state.summary === "object" ? state.summary as { short?: string; full?: string } : {});
     setMineruRegions(Array.isArray(layout.regions) ? layout.regions as VisualRegion[] : []);
     setMineruReady(Boolean(layout.ready));
-    setDocumentTitle(typeof layout.documentTitle === "string" ? layout.documentTitle : "");
+    setDetectedDocumentTitle(typeof layout.documentTitle === "string" ? layout.documentTitle : "", true);
     if (Array.isArray(layout.outline) && layout.outline.length) setOutline(layout.outline as OutlineItem[]);
     setPaperStateLoaded(true);
     window.setTimeout(() => {
@@ -1705,7 +1746,7 @@ function App() {
     setCurrentPaperId(options.paperId || "");
     setPaperStateLoaded(!options.paperId);
     importSourceUrl.current = options.sourceUrl || null;
-    setSelections([]); setHighlights([]); setVisualSelections([]); setVisualMode(false); setMineruRegions([]); setMineruReady(false); setDocumentTitle(""); setLayoutState({ state: "idle" }); autoLayoutDocument.current = "";
+    setSelections([]); setHighlights([]); setVisualSelections([]); setVisualMode(false); setMineruRegions([]); setMineruReady(false); detectedDocumentTitle.current = ""; setDocumentTitle(""); setLayoutState({ state: "idle" }); autoLayoutDocument.current = "";
     setDocumentReady(false); setDocumentText(""); setPdf(null); setOutline([]);
     setFileName(name);
     setSummary({}); setSummaryOpen({ short: false, full: false });
@@ -1716,6 +1757,9 @@ function App() {
     setDocumentId(crypto.randomUUID());
     setUrlLoading(false);
     setOutline(((await document.getOutline().catch(() => [])) ?? []) as OutlineItem[]);
+    const metadata = await document.getMetadata().catch(() => null);
+    setDetectedDocumentTitle(metadata?.info?.Title, false);
+    if (!detectedDocumentTitle.current) setDetectedDocumentTitle(await inferFirstPageTitle(document), false);
     // PDF.js takes ownership of the TypedArray passed to getDocument(), so
     // retain analysis bytes from its own cached document instead of reusing
     // the caller's now-detached ArrayBuffer.
@@ -1882,7 +1926,7 @@ function App() {
       const parsedOutline = collectMineruOutline(raw, pdf.numPages);
       const parsedTitle = collectMineruDocumentTitle(raw, pdf.numPages);
       if (parsedOutline.length) setOutline(parsedOutline);
-      if (parsedTitle) setDocumentTitle(parsedTitle);
+      if (parsedTitle) setDetectedDocumentTitle(parsedTitle, true);
       setMineruRegions(regions); setMineruReady(true);
       setLayoutState({ state: "done", message: regions.length ? `阅读体验优化完成：已识别 ${regions.filter((item: VisualRegion) => item.kind === "image").length} 张图片、${regions.filter((item: VisualRegion) => item.kind === "table").length} 个表格与 ${regions.filter((item: VisualRegion) => item.kind === "formula").length} 条公式` : "阅读体验优化完成，未发现可交互结构区域。", progress: 100 });
     } catch (error) {
