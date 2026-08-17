@@ -29,9 +29,8 @@ export async function listLibraryPapers() {
 
 export async function listBrainstormPapers() {
   const { data, error } = await supabase.from("library_papers")
-    .select("id,title,page_count,archived_at,document_text")
+    .select("id,title,storage_path,page_count,archived_at,document_text")
     .eq("archived_at", null)
-    .not("document_text", "is", null)
     .order("last_opened_at", { ascending: false });
   if (error) throw error;
   return (data || []) as unknown as LibraryPaper[];

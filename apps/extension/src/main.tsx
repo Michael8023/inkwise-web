@@ -110,6 +110,18 @@ async function consumeAiStream(response: Response, onDelta: (delta: string) => v
   const reader = response.body.getReader(), decoder = new TextDecoder(); let buffer = "";
   while (true) { const { done, value } = await reader.read(); if (done) break; buffer += decoder.decode(value, { stream: true }); const events = buffer.split("\n\n"); buffer = events.pop() || ""; for (const rawEvent of events) { const line = rawEvent.split("\n").find(item => item.startsWith("data:")); if (!line) continue; const payload = JSON.parse(line.slice(5).trim()); if (payload.error) throw new Error(payload.error); if (payload.delta) onDelta(String(payload.delta)); } }
 }
+async function extractLibraryPaperText(paper: LibraryPaper) {
+  const download = await supabase.storage.from("library-pdfs").download(paper.storage_path);
+  if (download.error || !download.data) throw download.error || new Error("LIBRARY_PDF_UNAVAILABLE");
+  const document = await pdfjsLib.getDocument({ data: await download.data.arrayBuffer() }).promise;
+  const pages: string[] = [];
+  for (let pageNumber = 1; pageNumber <= Math.min(document.numPages, 40); pageNumber += 1) {
+    const page = await document.getPage(pageNumber); const content = await page.getTextContent();
+    pages.push(content.items.map((item: any) => item.str).join(" "));
+    if (pages.join("\n").length >= 30000) break;
+  }
+  return pages.join("\n").slice(0, 30000);
+}
 const PUBLIC_READER_ORIGIN = "https://www.inkwise.site";
 const MAX_PDF_IMPORT_BYTES = 128 * 1024 * 1024;
 const MAX_LIBRARY_PDF_BYTES = 50 * 1024 * 1024;
@@ -520,7 +532,7 @@ function BrainstormPanel({ session, model, documentTitle, documentText, currentP
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState("");
-  const availablePapers = papers.filter(paper => !paper.archived_at && paper.id !== currentPaperId && Boolean(paper.document_text?.trim()));
+  const availablePapers = papers.filter(paper => !paper.archived_at && paper.id !== currentPaperId);
   useEffect(() => { if (!session) { setLoading(false); return; } let active = true; void Promise.all([supabase.from("research_profiles").select("overview").maybeSingle(), listBrainstormPapers()]).then(([profile, library]) => { if (!active) return; setOverview(profile.data?.overview || ""); setPapers(library); }).catch(() => { if (active) setResult("无法读取研究主线或文献库，请稍后重试。"); }).finally(() => { if (active) setLoading(false); }); return () => { active = false; }; }, [session]);
   const togglePaper = (id: string) => setSelected(current => current.includes(id) ? current.filter(item => item !== id) : current.length >= 5 ? current : [...current, id]);
   async function brainstorm() {
@@ -528,14 +540,16 @@ function BrainstormPanel({ session, model, documentTitle, documentText, currentP
     setRunning(true); setResult("");
     try {
       const extras = availablePapers.filter(paper => selected.includes(paper.id));
-      const response = await functionRequest("ai-brainstorm", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model, researchOverview: overview, sources: [{ title: documentTitle || "当前阅读文献", text: documentText.slice(0, 80000) }, ...extras.map(paper => ({ title: paper.title, text: paper.document_text!.slice(0, 16000) }))], requestId: crypto.randomUUID() }) });
+      const extraSources = (await Promise.all(extras.map(async paper => { const text = paper.document_text?.trim() || await extractLibraryPaperText(paper); return { id: paper.id, title: paper.title, text: text.slice(0, 16000) }; }))).filter(source => source.text);
+      setPapers(current => current.map(paper => { const source = extraSources.find(item => item.id === paper.id); return source ? { ...paper, document_text: source.text } : paper; }));
+      const response = await functionRequest("ai-brainstorm", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model, researchOverview: overview, sources: [{ title: documentTitle || "当前阅读文献", text: documentText.slice(0, 80000) }, ...extraSources.map(({ title, text }) => ({ title, text }))], requestId: crypto.randomUUID() }) });
       const payload = await response.json(); if (!response.ok || !payload.text) throw new Error(payload.error || "AI_BRAINSTORM_FAILED");
       setResult(payload.text); if (typeof payload.creditsRemaining === "number") onUsage(payload.creditsRemaining);
     } catch (error) { setResult(readableApiError(error, "Brainstorm 暂时无法生成，请稍后重试。")); }
     finally { setRunning(false); }
   }
   if (!session) return <div className="brainstorm-empty"><Brain size={28}/><strong>登录后开启 Brainstorm</strong><p>将你的研究主线与私有文献库连接起来，获得有依据的研究启发。</p></div>;
-  return <div className="panel-content brainstorm-panel"><section className="brainstorm-intro"><span><Brain size={16}/> RESEARCH BRAINSTORM</span><h2>从文献到你的下一步</h2><p>AI 会围绕你的研究主线，区分论文证据与可验证的推断。</p></section><section className="brainstorm-profile"><div><strong>当前研究主线</strong><button type="button" onClick={onOpenLibrary}>在工作台编辑</button></div>{loading ? <p>正在读取研究画像…</p> : overview ? <p>{overview}</p> : <div className="brainstorm-profile-empty"><p>尚未填写个人工作概述。先在文献工作台定义研究目标与约束，Brainstorm 才能给出贴合的建议。</p><button type="button" onClick={onOpenLibrary}>建立研究主线</button></div>}</section><section className="brainstorm-sources"><div className="brainstorm-section-heading"><strong>本次参考文献</strong><small>最多再选 5 篇</small></div><label className="brainstorm-current"><input type="checkbox" checked readOnly/><span><b>当前</b>{documentTitle || "当前阅读文献"}</span></label>{loading ? null : availablePapers.length ? <div className="brainstorm-library-list">{availablePapers.map(paper => <label key={paper.id}><input type="checkbox" checked={selected.includes(paper.id)} disabled={!selected.includes(paper.id) && selected.length >= 5} onChange={() => togglePaper(paper.id)}/><span>{paper.title}<small>{paper.page_count || "—"} 页 · 文献库</small></span></label>)}</div> : <p className="brainstorm-muted">文献库中暂无可分析的其他文献。</p>}</section><button className="brainstorm-run" onClick={() => void brainstorm()} disabled={running || !model || !overview.trim() || !documentText.trim()}>{running ? <><RefreshCw className="auth-spinner" size={16}/>正在连接研究线索…</> : <><Brain size={17}/>生成研究启发{selected.length ? ` · 另含 ${selected.length} 篇` : ""}</>}</button>{!model && <p className="brainstorm-muted">请先在 AI 助手中选择模型。</p>}{result && <section className="brainstorm-result"><div><strong>本次启发</strong><button type="button" onClick={() => navigator.clipboard.writeText(result)} title="复制结果"><Copy size={15}/></button></div><ReactMarkdown>{result}</ReactMarkdown></section>}</div>;
+  return <div className="panel-content brainstorm-panel"><section className="brainstorm-intro"><span><Brain size={16}/> RESEARCH BRAINSTORM</span><h2>从文献到你的下一步</h2><p>AI 会围绕你的研究主线，区分论文证据与可验证的推断。</p></section><section className="brainstorm-profile"><div><strong>当前研究主线</strong><button type="button" onClick={onOpenLibrary}>在工作台编辑</button></div>{loading ? <p>正在读取研究画像…</p> : overview ? <p>{overview}</p> : <div className="brainstorm-profile-empty"><p>尚未填写个人工作概述。先在文献工作台定义研究目标与约束，Brainstorm 才能给出贴合的建议。</p><button type="button" onClick={onOpenLibrary}>建立研究主线</button></div>}</section><section className="brainstorm-sources"><div className="brainstorm-section-heading"><strong>本次参考文献</strong><small>最多再选 5 篇</small></div><label className="brainstorm-current"><input type="checkbox" checked readOnly/><span><b>当前</b>{documentTitle || "当前阅读文献"}</span></label>{loading ? null : availablePapers.length ? <div className="brainstorm-library-list">{availablePapers.map(paper => <label key={paper.id}><input type="checkbox" checked={selected.includes(paper.id)} disabled={!selected.includes(paper.id) && selected.length >= 5} onChange={() => togglePaper(paper.id)}/><span>{paper.title}<small>{paper.page_count || "—"} 页 · 文献库{paper.document_text ? "" : " · 首次分析时读取"}</small></span></label>)}</div> : <p className="brainstorm-muted">文献库中还没有其他文献。</p>}</section><button className="brainstorm-run" onClick={() => void brainstorm()} disabled={running || !model || !overview.trim() || !documentText.trim()}>{running ? <><RefreshCw className="auth-spinner" size={16}/>正在连接研究线索…</> : <><Brain size={17}/>生成研究启发{selected.length ? ` · 另含 ${selected.length} 篇` : ""}</>}</button>{!model && <p className="brainstorm-muted">请先在 AI 助手中选择模型。</p>}{result && <section className="brainstorm-result"><div><strong>本次启发</strong><button type="button" onClick={() => navigator.clipboard.writeText(result)} title="复制结果"><Copy size={15}/></button></div><ReactMarkdown>{result}</ReactMarkdown></section>}</div>;
 }
 
 function PaymentResultScreen() {
