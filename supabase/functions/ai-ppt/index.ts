@@ -43,16 +43,6 @@ Deno.serve(async (req) => {
   const preflightResponse = preflight(req); if (preflightResponse) return preflightResponse;
   try {
     const currentUser = await user(req);
-    const { data: entitlement, error: entitlementError } = await admin()
-      .from("user_entitlements")
-      .select("status,period_end,plans(name)")
-      .eq("user_id", currentUser.id)
-      .maybeSingle();
-    if (entitlementError) throw entitlementError;
-    const isPro = (entitlement as any)?.plans?.name === "pro"
-      && (entitlement as any)?.status === "active"
-      && new Date((entitlement as any)?.period_end || 0) > new Date();
-    if (!isPro) throw new Error("PRO_REQUIRED");
     await rateLimit(currentUser.id, "ai_ppt", 10);
     const input = await body(req);
     const action = clean(input.action, 20) as Action;

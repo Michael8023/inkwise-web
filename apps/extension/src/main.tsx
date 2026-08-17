@@ -2601,6 +2601,7 @@ function App() {
     onImportFile={file => { setLibraryOpen(false); void openFile(file); }}
     onImportUrl={async value => { setLibraryOpen(false); await loadPdfUrl(value, true); }}
     extractText={extractLibraryPaperText}
+    onOpenAccount={() => setAuthOpen(true)}
   />;
 
   if (!pdf) {

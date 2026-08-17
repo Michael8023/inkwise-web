@@ -31,7 +31,11 @@ Deno.serve(async req => {
       .eq("user_id", u.id).eq("feature", "ai_ppt").neq("status", "failed")
       .gte("created_at", monthStart.toISOString());
     if (aiPptError) throw aiPptError;
+    const { count: aiPptTrialUsed, error: aiPptTrialError } = await db.from("usage_ledger")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", u.id).eq("feature", "ai_ppt_trial").neq("status", "failed");
+    if (aiPptTrialError) throw aiPptTrialError;
     const activePlan = (entitlement as any).plans?.name || "free";
-    return json({ plan: activePlan, creditsRemaining: entitlement.credits_remaining ?? 0, periodEnd: activePlan === "pro" ? entitlement.period_end : null, aiPptFreeRemaining: Math.max(6 - (aiPptUsed || 0), 0), recentUsage: recent || [] });
+    return json({ plan: activePlan, creditsRemaining: entitlement.credits_remaining ?? 0, periodEnd: activePlan === "pro" ? entitlement.period_end : null, aiPptFreeRemaining: Math.max(6 - (aiPptUsed || 0), 0), aiPptTrialUsed: (aiPptTrialUsed || 0) > 0, recentUsage: recent || [] });
   } catch (e) { return json({ error: e instanceof Error ? e.message : "USAGE_FAILED" }, 401); }
 });
