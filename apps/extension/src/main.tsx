@@ -494,11 +494,23 @@ function AuthDialog({
   </form></div>;
 }
 
+type PaymentOrder = { out_trade_no: string; product_name: string; product_type: "credits" | "pro_month"; credits: number | null; amount_cents: number; status: "pending" | "paid" | "closed"; paid_at: string | null; created_at: string };
+
+function OrdersDialog({ onClose }: { onClose: () => void }) {
+  const [orders, setOrders] = useState<PaymentOrder[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  useEffect(() => { let active = true; functionRequest("alipay-payment?history=1").then(async response => { const result = await response.json(); if (!response.ok) throw new Error(result.error || "ORDERS_FAILED"); return result.orders as PaymentOrder[]; }).then(items => { if (active) setOrders(items); }).catch(() => { if (active) setError("订单暂时无法加载，请稍后重试。"); }).finally(() => { if (active) setLoading(false); }); return () => { active = false; }; }, []);
+  const statusLabel: Record<PaymentOrder["status"], string> = { paid: "已支付", pending: "待支付", closed: "已关闭" };
+  return <div className="auth-backdrop"><section className="auth-dialog orders-dialog"><button type="button" className="popover-close" onClick={onClose}><X size={16}/></button><div className="auth-brand"><img src="/brand/shidea-mark.png" alt=""/><span>识谛 <em>shidea</em></span></div><div className="auth-heading"><h2>我的订单</h2><p>查看积分包与 Pro 会员的购买记录。</p></div>{loading ? <p className="orders-empty">正在加载订单…</p> : error ? <p className="auth-feedback error">{error}</p> : orders.length ? <div className="order-list">{orders.map(order => <article key={order.out_trade_no}><div><strong>{order.product_name}</strong><span>{new Date(order.created_at).toLocaleString("zh-CN", { dateStyle: "medium", timeStyle: "short" })}</span></div><div><b>¥{(order.amount_cents / 100).toFixed(2)}</b><em className={`order-status ${order.status}`}>{statusLabel[order.status]}</em></div></article>)}</div> : <p className="orders-empty">还没有订单记录。</p>}<small className="orders-note">支付状态以支付宝异步通知为准。</small></section></div>;
+}
+
 function AccountDialog({ session, usage, inviteCode, onClose, onSignOut, onOpenLibrary, onOpenFeedback, onOpenPurchase }: { session: AuthSession; usage: Usage | null; inviteCode: string; onClose: () => void; onSignOut: () => void; onOpenLibrary: () => void; onOpenFeedback: () => void; onOpenPurchase: () => void }) {
   const displayName = String(session.user.user_metadata?.display_name || session.user.user_metadata?.username || "识谛用户");
   const initial = displayName.trim().slice(0, 1).toUpperCase() || "I";
   const creditAmount = usage?.creditsRemaining ?? 0;
   const [inviteCopied, setInviteCopied] = useState<"code" | "link" | "">("");
+  const [ordersOpen, setOrdersOpen] = useState(false);
   const inviteLink = inviteCode ? `${window.location.origin}${window.location.pathname}?invite=${encodeURIComponent(inviteCode)}` : "";
   const copyInvite = async (kind: "code" | "link") => { const value = kind === "code" ? inviteCode : inviteLink; if (!value) return; await navigator.clipboard.writeText(value); setInviteCopied(kind); window.setTimeout(() => setInviteCopied(""), 1800); };
   return <div className="auth-backdrop"><section className="auth-dialog account-dialog">
@@ -509,10 +521,13 @@ function AccountDialog({ session, usage, inviteCode, onClose, onSignOut, onOpenL
     <button type="button" className="account-purchase" onClick={onOpenPurchase}><Plus size={16}/>{usage?.plan === "pro" ? "续费 Pro 会员" : "购买积分 / 开通 Pro"}</button>
     <div className="quota-summary"><span>当前套餐<strong>{usage?.plan ? usage.plan.toUpperCase() : "FREE"}</strong></span><span>{usage?.plan === "pro" ? "有效至" : "AI 调用"}<strong>{usage?.plan === "pro" && usage.periodEnd ? new Date(usage.periodEnd).toLocaleDateString("zh-CN", { month: "short", day: "numeric" }) : usage?.plan === "pro" ? "—" : "2 分 / 次"}</strong></span></div>
     <section className="account-invite"><span>我的邀请码</span><strong>{inviteCode || "正在生成…"}</strong><small>好友注册时填写，即可获得后台设置的新人奖励。</small><div className="account-invite-actions"><button type="button" disabled={!inviteCode} onClick={() => void copyInvite("code")}><Copy size={13}/>{inviteCopied === "code" ? "已复制" : "复制邀请码"}</button><button type="button" disabled={!inviteLink} onClick={() => void copyInvite("link")}><Link2 size={13}/>{inviteCopied === "link" ? "已复制" : "复制邀请链接"}</button></div></section>
-    <button type="button" className="account-library" onClick={onOpenLibrary}><span className="account-library-icon"><FolderOpen size={22}/></span><span className="account-library-copy"><small>个人文献工作台</small><strong>整理每一篇重要文献</strong><em>查看文献库、继续阅读与管理资料</em></span><ChevronRight size={19} /></button>
-    <button type="button" className="account-feedback" onClick={onOpenFeedback}><MessageSquare size={16}/><span><small>共创识谛</small><strong>提交反馈与建议</strong></span><ChevronRight size={17}/></button>
+    <div className="account-actions">
+      <button type="button" className="account-action" onClick={onOpenLibrary}><span className="account-action-icon"><FolderOpen size={18}/></span><span><small>文献工作台</small><strong>管理我的文献与研究资料</strong></span><ChevronRight size={17}/></button>
+      <button type="button" className="account-action" onClick={() => setOrdersOpen(true)}><span className="account-action-icon"><FileText size={18}/></span><span><small>交易记录</small><strong>我的订单</strong></span><ChevronRight size={17}/></button>
+      <button type="button" className="account-action" onClick={onOpenFeedback}><span className="account-action-icon"><MessageSquare size={18}/></span><span><small>共创识谛</small><strong>提交反馈与建议</strong></span><ChevronRight size={17}/></button>
+    </div>
     <button type="button" className="account-signout" onClick={onSignOut}><LogOut size={15} />退出登录</button>
-  </section></div>;
+  </section>{ordersOpen && <OrdersDialog onClose={() => setOrdersOpen(false)}/>}</div>;
 }
 
 function PurchaseDialog({ busy, error, onClose, onPurchase }: { busy: string; error: string; onClose: () => void; onPurchase: (code: string) => void }) {

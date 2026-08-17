@@ -11,7 +11,15 @@ Deno.serve(async req => {
   try {
     const currentUser = await user(req); const db = admin();
     if (req.method === "GET") {
-      const orderNo = new URL(req.url).searchParams.get("outTradeNo") || "";
+      const url = new URL(req.url);
+      if (url.searchParams.get("history") === "1") {
+        const { data, error } = await db.from("payment_orders")
+          .select("out_trade_no,product_name,product_type,credits,amount_cents,status,paid_at,created_at")
+          .eq("user_id", currentUser.id).order("created_at", { ascending: false }).limit(50);
+        if (error) throw error;
+        return json({ orders: data || [] });
+      }
+      const orderNo = url.searchParams.get("outTradeNo") || "";
       const { data, error } = await db.from("payment_orders").select("out_trade_no,status,credits,amount_cents,product_type,duration_days,paid_at").eq("out_trade_no", orderNo).eq("user_id", currentUser.id).maybeSingle();
       if (error || !data) throw new Error("ORDER_NOT_FOUND"); return json({ order: data });
     }
