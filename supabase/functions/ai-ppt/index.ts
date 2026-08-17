@@ -28,6 +28,15 @@ function responseData(value: unknown): Record<string, unknown> {
   return (root.data && typeof root.data === "object" ? root.data : root) as Record<string, unknown>;
 }
 
+function upstreamRequest(action: Action, request: Record<string, unknown>) {
+  // DocMee's public schema intentionally stays small. Do not forward UI-only
+  // fields such as `prompt`, `content`, or `stream`, which its router rejects.
+  if (action === "outline" || action === "direct") return { subject: clean(request.subject, 60000) };
+  if (action === "content") return { outlineMarkdown: clean(request.outlineMarkdown, 100000), asyncGenPptx: Boolean(request.asyncGenPptx) };
+  if (action === "markdown") return { markdown: clean(request.markdown, 100000) };
+  return request;
+}
+
 Deno.serve(async (req) => {
   const preflightResponse = preflight(req); if (preflightResponse) return preflightResponse;
   try {
@@ -50,7 +59,7 @@ Deno.serve(async (req) => {
     const upstream = await fetch(target, {
       method: action === "status" ? "GET" : "POST",
       headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}`, "Accept": wantsStream ? "text/event-stream" : "application/json" },
-      body: action === "status" ? undefined : JSON.stringify(request),
+      body: action === "status" ? undefined : JSON.stringify(upstreamRequest(action, request)),
     });
     if (!upstream.ok) {
       const detail = clean(await upstream.text(), 500);

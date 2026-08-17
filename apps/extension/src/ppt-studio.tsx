@@ -28,18 +28,22 @@ async function pptRequest(action: string, request: Record<string, unknown>) {
 async function pptStream(action: "outline" | "content", request: Record<string, unknown>, onText: (value: string) => void, onPptId: (value: string) => void) {
   const response = await functionRequest("ai-ppt", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, request: { ...request, stream: true } }) });
   if (!response.ok || !response.body) { const payload = await response.json().catch(() => ({})); throw new Error(payload.error || "AI_PPT_STREAM_FAILED"); }
+  if ((response.headers.get("content-type") || "").includes("application/json")) {
+    const item = await response.json(); const text = readStreamValue(item); const candidate = item?.pptId || item?.data?.pptId || item?.ppt_id;
+    if (text) onText(text); if (candidate) onPptId(String(candidate)); return text;
+  }
   const reader = response.body.getReader(), decoder = new TextDecoder(); let buffer = "", fullText = "";
+  const consume = (raw: string) => { if (!raw || raw === "[DONE]") return; const item = JSON.parse(raw); const text = readStreamValue(item); if (text) { fullText += text; onText(fullText); } const candidate = item?.pptId || item?.data?.pptId || item?.ppt_id; if (candidate) onPptId(String(candidate)); };
   while (true) {
     const { done, value } = await reader.read(); if (done) break;
     buffer += decoder.decode(value, { stream: true });
     const events = buffer.split("\n\n"); buffer = events.pop() || "";
     for (const event of events) {
       const raw = event.split("\n").filter(line => line.startsWith("data:")).map(line => line.slice(5).trim()).join("\n");
-      if (!raw || raw === "[DONE]") continue;
-      const item = JSON.parse(raw); const text = readStreamValue(item); if (text) { fullText += text; onText(fullText); }
-      const candidate = item?.pptId || item?.data?.pptId || item?.ppt_id; if (candidate) onPptId(String(candidate));
+      consume(raw);
     }
   }
+  if (buffer.trim()) consume(buffer.split("\n").filter(line => line.startsWith("data:")).map(line => line.slice(5).trim()).join("\n") || buffer.trim());
   return fullText;
 }
 
@@ -58,10 +62,10 @@ export function PptStudio({ papers, extractText }: { papers: LibraryPaper[]; ext
     setError(""); setResult({}); setPreview(""); setState("reading");
     try {
       const source = await extractText(paper);
-      const instruction = `${prompt.trim() || "请将这篇文献制作成逻辑清晰、适合汇报的中文演示文稿。"}\n\n参考 PDF：《${paper.title}》\n\n${source}`;
+      const instruction = `${prompt.trim() || "请将这篇文献制作成逻辑清晰、适合汇报的中文演示文稿。"}\n\n参考 PDF：《${paper.title}》\n\n${source}`.slice(0, 60000);
       setState("generating");
       if (mode === "direct") {
-        const next = await pptRequest("direct", { title: paper.title, prompt: instruction, content: source, stream: false });
+        const next = await pptRequest("direct", { subject: instruction });
         setResult(next); setState(next.fileUrl ? "done" : "polling"); return;
       }
       if (mode === "markdown") {
@@ -70,8 +74,8 @@ export function PptStudio({ papers, extractText }: { papers: LibraryPaper[]; ext
         setResult(next); setState(next.fileUrl ? "done" : "polling"); return;
       }
       let pptId = "";
-      const outline = await pptStream("outline", { title: paper.title, prompt: instruction, content: source }, setPreview, value => { pptId = value; setResult(current => ({ ...current, pptId: value })); });
-      const full = await pptStream("content", { title: paper.title, outline: outline || preview, prompt: prompt.trim(), asyncGenPptx: true }, setPreview, value => { pptId = value; setResult(current => ({ ...current, pptId: value })); });
+      const outline = await pptStream("outline", { subject: instruction }, setPreview, value => { pptId = value; setResult(current => ({ ...current, pptId: value })); });
+      const full = await pptStream("content", { outlineMarkdown: outline || preview, asyncGenPptx: true }, setPreview, value => { pptId = value; setResult(current => ({ ...current, pptId: value })); });
       setMarkdown(full || outline || preview);
       setState(pptId ? "polling" : "done");
     } catch (caught) { setState("error"); setError(caught instanceof Error ? caught.message.replace(/^DOCMEE_UPSTREAM_\d+:/, "") : "PPT 生成失败，请稍后重试。"); }
