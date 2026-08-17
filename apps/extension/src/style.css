@@ -651,6 +651,7 @@ button {
 .plan-pill { display: inline-flex; border-radius: 4px; background: #e9f4f0; color: #28795f; padding: 4px 7px; font-size: 9px; }
 .credit-number { color: #1e2d28; font-size: 13px; }
 .admin-table-wrap i { color: #9c655f; font-size: 10px; font-style: normal; text-transform: uppercase; }
+.admin-header-stats { display: flex; align-items: center; gap: 10px; }.admin-upstream-balance { display: flex; align-items: center; gap: 9px; min-width: 225px; border: 1px solid #c8e3dc; border-radius: 8px; background: linear-gradient(135deg, #f0fbf8, #f7fcfb); color: #258567; padding: 9px 10px; }.admin-upstream-balance > div { display: grid; gap: 2px; }.admin-upstream-balance span,.admin-upstream-balance small { color: #718981; font-size: 9px; }.admin-upstream-balance strong { color: #1d5c4d; font-size: 15px; line-height: 1.1; }.admin-upstream-balance button { margin-left: auto; border: 0; background: transparent; color: #278367; padding: 4px; font-size: 10px; font-weight: 700; cursor: pointer; }.admin-upstream-balance button:disabled { cursor: wait; opacity: .6; }
 .admin-table-wrap i.status-active { color: #258060; }
 .row-action { border: 1px solid #ccd9d4; border-radius: 5px; background: #fff; color: #267c61; padding: 6px 10px; cursor: pointer; }
 .row-action:hover { border-color: #4b9a7f; background: #f1f9f6; }

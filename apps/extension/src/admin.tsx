@@ -16,6 +16,7 @@ type Detail = {
   adjustments: Array<{ id: string; operation: string; amount: number; credits_before: number; credits_after: number; note: string | null; created_at: string }>;
 };
 type FeedbackItem = { id: string; user_id: string; category: "suggestion" | "bug" | "other"; content: string; status: "todo" | "done"; created_at: string; email: string };
+type UpstreamBalance = { name: string; totalGranted: number; totalUsed: number; totalAvailable: number; unlimited: boolean; expiresAt: number | null };
 
 const errors: Record<string, string> = {
   ADMIN_REQUIRED: "当前账号没有后台管理权限。",
@@ -29,6 +30,7 @@ const errors: Record<string, string> = {
   DEFAULT_PLAN_REQUIRED: "请先将其他套餐设为新用户默认套餐。",
   INVALID_MODELS: "请至少选择一个有效模型。",
   UPSTREAM_MODELS_FAILED: "无法读取模型服务列表，请稍后刷新重试。",
+  UPSTREAM_BALANCE_FAILED: "无法读取 Apilio 上游余额，请稍后重试。",
   NETWORK_REQUEST_FAILED: "请求未能到达后台。请确认 Edge Function 已部署，并检查网络或跨域配置。",
   PASSWORD_INVALID: "密码长度需为 8 至 72 位。",
   PASSWORD_MISMATCH: "两次输入的密码不一致。",
@@ -94,6 +96,9 @@ function AdminApp() {
   const [adminPage, setAdminPage] = useState<"users" | "feedback">("users");
   const [referralBonus, setReferralBonus] = useState("50");
   const [referralSaving, setReferralSaving] = useState(false);
+  const [upstreamBalance, setUpstreamBalance] = useState<UpstreamBalance | null>(null);
+  const [balanceCheckedAt, setBalanceCheckedAt] = useState("");
+  const [balanceLoading, setBalanceLoading] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => { setSession(data.session); setChecked(true); });
@@ -102,6 +107,7 @@ function AdminApp() {
   }, []);
   useEffect(() => { if (session) loadUsers(); }, [session, page, query]);
   useEffect(() => { if (session) void loadModels(); }, [session]);
+  useEffect(() => { if (!session) return; void loadUpstreamBalance(); const timer = window.setInterval(() => void loadUpstreamBalance(), 30_000); return () => window.clearInterval(timer); }, [session]);
 
   async function request(path = "", init?: RequestInit) {
     const response = await functionRequest(`admin-users${path}`, init);
@@ -126,6 +132,12 @@ function AdminApp() {
       setSelectedModelIds(new Set(items.filter(item => item.enabled).map(item => item.id)));
     } catch (cause) { const code=cause instanceof Error?cause.message:""; setError(errors[code] || code || "模型列表加载失败。"); }
     finally { setModelsLoading(false); }
+  }
+  async function loadUpstreamBalance() {
+    setBalanceLoading(true);
+    try { const result = await request("?balance=1"); setUpstreamBalance(result.balance || null); setBalanceCheckedAt(result.checkedAt || new Date().toISOString()); }
+    catch (cause) { const code = cause instanceof Error ? cause.message : ""; setError(current => current || errors[code] || code || "上游余额读取失败。"); }
+    finally { setBalanceLoading(false); }
   }
   function toggleModel(id: string) {
     setSelectedModelIds(current => {
@@ -213,9 +225,10 @@ function AdminApp() {
   const normalizedModelSearch = modelSearch.trim().toLowerCase();
   const visibleModels = catalogModels.filter(item => !normalizedModelSearch || `${item.name} ${item.id} ${item.provider}`.toLowerCase().includes(normalizedModelSearch));
   const modelGroups = visibleModels.reduce<Record<string, CatalogModel[]>>((groups, item) => { (groups[item.provider] ||= []).push(item); return groups; }, {});
+  const formatQuota = (value: number) => new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 2 }).format(value);
   return <div className="admin-app">
     <aside className="admin-nav"><div className="admin-logo"><img src="/brand/shidea-mark.png" alt="" /><div>识谛<strong>CONTROL</strong></div></div><nav><button className={adminPage === "users" ? "active" : ""} onClick={() => setAdminPage("users")}><Users size={17}/>用户与额度</button><button className={adminPage === "feedback" ? "active" : ""} onClick={() => setAdminPage("feedback")}><MessageSquare size={17}/>反馈待办</button></nav><div className="admin-nav-foot"><span>{session.user.email}</span><button onClick={() => supabase.auth.signOut()}><LogOut size={15}/>退出</button></div></aside>
-    {adminPage === "feedback" ? <FeedbackAdmin /> : <main className="admin-main"><header><div><span>OPERATIONS</span><h1>用户额度管理</h1><p>管理套餐、积分余额并审计每一次人工调整。</p></div><div className="admin-stat"><Users size={18}/><span>注册用户<strong>{total}</strong></span></div></header>
+    {adminPage === "feedback" ? <FeedbackAdmin /> : <main className="admin-main"><header><div><span>OPERATIONS</span><h1>用户额度管理</h1><p>管理套餐、积分余额并审计每一次人工调整。</p></div><div className="admin-header-stats"><div className="admin-stat"><Users size={18}/><span>注册用户<strong>{total}</strong></span></div><section className="admin-upstream-balance"><Coins size={18}/><div><span>Apilio 上游可用额度</span><strong>{upstreamBalance ? upstreamBalance.unlimited ? "不限额" : formatQuota(upstreamBalance.totalAvailable) : balanceLoading ? "读取中…" : "—"}</strong><small>{upstreamBalance ? `${upstreamBalance.name} · 已用 ${formatQuota(upstreamBalance.totalUsed)}` : "每 30 秒自动刷新"}</small></div><button type="button" onClick={() => void loadUpstreamBalance()} disabled={balanceLoading}>{balanceLoading ? "刷新中" : "刷新"}</button></section></div></header>
       <section className="admin-toolbar"><form onSubmit={event => { event.preventDefault(); setPage(1); setQuery(search); }}><Search size={17}/><input placeholder="搜索邮箱、用户名" value={search} onChange={event => setSearch(event.target.value)}/><button>搜索</button></form><button className="admin-refresh" onClick={loadUsers}>刷新数据</button></section>
       {error && <div className="admin-alert"><ShieldCheck size={17}/>{error}</div>}
       <section className="plan-management"><div className="plan-management-head"><div><span>新用户默认套餐</span><h2>套餐与初始额度</h2></div><button className="admin-add-plan" onClick={() => beginPlanEdit()}><Plus size={16}/>新增套餐</button></div><div className="plan-grid">{plans.map(plan => <article key={plan.id} className={plan.is_default ? "default-plan" : ""}><div><strong>{plan.name.toUpperCase()}</strong>{plan.is_default && <b>新用户默认</b>}</div><span>初始额度 <em>{Number(plan.monthly_credits).toLocaleString()} 分</em></span><button onClick={() => beginPlanEdit(plan)}>修改</button></article>)}</div>{editingPlanId && <form className="plan-editor" onSubmit={savePlan}><label>套餐名称<input required maxLength={32} value={planName} onChange={event => setPlanName(event.target.value)} placeholder="例如：team" /></label><label>新用户初始额度<input type="number" min="0" max="10000000" required value={planCredits} onChange={event => setPlanCredits(event.target.value)} /></label><label className="default-plan-toggle"><input type="checkbox" checked={planDefault} onChange={event => setPlanDefault(event.target.checked)} />设为新用户默认套餐</label><div><button type="button" onClick={() => setEditingPlanId(null)} disabled={savingPlan}>取消</button><button disabled={savingPlan}>{savingPlan ? "正在保存…" : "保存套餐"}</button></div></form>}</section>

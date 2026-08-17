@@ -29,6 +29,17 @@ async function upstreamModels(): Promise<RemoteModel[]> {
   return [...unique.values()].sort((a, b) => a.provider.localeCompare(b.provider) || a.name.localeCompare(b.name));
 }
 
+async function upstreamBalance() {
+  const configuredBase = (env("APILIO_BASE_URL") || "https://api.apilio.ai/v1").replace(/\/$/, "");
+  const baseUrl = configuredBase.replace(/\/v1$/, "");
+  const response = await fetch(`${baseUrl}/api/usage/token`, { headers: { Authorization: `Bearer ${env("APILIO_API_KEY")}`, Accept: "application/json" } });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload?.data) throw new Error("UPSTREAM_BALANCE_FAILED");
+  const data = payload.data;
+  const numeric = (value: unknown) => Number.isFinite(Number(value)) ? Number(value) : 0;
+  return { name: String(data.name || "Apilio API"), totalGranted: numeric(data.total_granted), totalUsed: numeric(data.total_used), totalAvailable: numeric(data.total_available), unlimited: data.unlimited_quota === true, expiresAt: numeric(data.expires_at) || null };
+}
+
 async function requireAdmin(req: Request) {
   const currentUser = await user(req);
   const db = admin();
@@ -48,6 +59,7 @@ function statusFor(message: string) {
   if (message === "PASSWORD_INVALID") return 400;
   if (message === "INVALID_REFERRAL_BONUS") return 400;
   if (message === "UPSTREAM_MODELS_FAILED") return 502;
+  if (message === "UPSTREAM_BALANCE_FAILED") return 502;
   return 400;
 }
 
@@ -79,6 +91,7 @@ Deno.serve(async req => {
         const catalogById = new Map((catalog || []).map(item => [item.model_id, item]));
         return json({ models: remote.map(item => ({ ...item, enabled: !!catalogById.get(item.id)?.enabled })) });
       }
+      if (url.searchParams.get("balance") === "1") return json({ balance: await upstreamBalance(), checkedAt: new Date().toISOString() });
       const detailUserId = url.searchParams.get("userId");
       if (detailUserId) {
         if (!/^[0-9a-f-]{36}$/i.test(detailUserId)) throw new Error("USER_NOT_FOUND");
