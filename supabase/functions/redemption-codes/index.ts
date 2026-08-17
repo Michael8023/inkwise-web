@@ -38,7 +38,17 @@ Deno.serve(async req => {
   const cors = preflight(req); if (cors) return cors;
   try {
     if (req.method === "GET") {
-      const url = new URL(req.url); if (url.searchParams.get("admin") !== "1") return json({ error: "METHOD_NOT_ALLOWED" }, 405);
+      const url = new URL(req.url);
+      if (url.searchParams.get("history") === "1") {
+        const current = await user(req);
+        const { data, error } = await admin().from("redemption_codes")
+          .select("product_code,product_type,credits,duration_days,redeemed_at")
+          .eq("redeemed_by", current.id).not("redeemed_at", "is", null)
+          .order("redeemed_at", { ascending: false }).limit(100);
+        if (error) throw error;
+        return json({ redemptions: data || [] });
+      }
+      if (url.searchParams.get("admin") !== "1") return json({ error: "METHOD_NOT_ALLOWED" }, 405);
       const { db } = await requireAdmin(req);
       const { data, error } = await db.from("redemption_codes").select("batch_label,product_code,product_type,credits,duration_days,created_at,redeemed_at").order("created_at", { ascending: false }).limit(500);
       if (error) throw error;
