@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { Check, ChevronLeft, ChevronRight, Coins, FileText, LogOut, MessageSquare, Plus, Search, ShieldCheck, Sparkles, Trash2, Users, X } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Coins, FileText, LogOut, MessageSquare, Search, ShieldCheck, Sparkles, Trash2, Users, X } from "lucide-react";
 import { functionRequest, supabase, supabaseConfigured } from "./api";
 import "./style.css";
 
@@ -25,9 +25,6 @@ const errors: Record<string, string> = {
   DELETE_CONFIRMATION_INVALID: "请输入与目标账户完全一致的邮箱地址以确认删除。",
   ADMIN_DELETE_FORBIDDEN: "不能删除管理员账户，包括当前登录的管理员。",
   USER_NOT_FOUND: "该用户已不存在或已被删除。",
-  INVALID_PLAN: "套餐名称须为 2-32 位英文、数字、下划线或短横线，额度须为有效整数。",
-  PLAN_NAME_EXISTS: "已存在同名套餐。",
-  DEFAULT_PLAN_REQUIRED: "请先将其他套餐设为新用户默认套餐。",
   INVALID_MODELS: "请至少选择一个有效模型。",
   UPSTREAM_MODELS_FAILED: "无法读取模型服务列表，请稍后刷新重试。",
   APILIO_BALANCE_NOT_CONFIGURED: "尚未配置 Apilio 系统令牌或用户 ID。",
@@ -84,18 +81,13 @@ function AdminApp() {
   const [adminPassword, setAdminPassword] = useState("");
   const [adminPasswordConfirm, setAdminPasswordConfirm] = useState("");
   const [passwordSaving, setPasswordSaving] = useState(false);
-  const [editingPlanId, setEditingPlanId] = useState<string | null>(null);
-  const [planName, setPlanName] = useState("");
-  const [planCredits, setPlanCredits] = useState("100");
-  const [planDefault, setPlanDefault] = useState(false);
-  const [savingPlan, setSavingPlan] = useState(false);
   const [catalogModels, setCatalogModels] = useState<CatalogModel[]>([]);
   const [selectedModelIds, setSelectedModelIds] = useState<Set<string>>(new Set());
   const [freeModelIds, setFreeModelIds] = useState<Set<string>>(new Set());
   const [modelsLoading, setModelsLoading] = useState(false);
   const [modelsSaving, setModelsSaving] = useState(false);
   const [modelSearch, setModelSearch] = useState("");
-  const [adminPage, setAdminPage] = useState<"users" | "feedback">("users");
+  const [adminPage, setAdminPage] = useState<"users" | "models" | "balance" | "feedback">("users");
   const [referralBonus, setReferralBonus] = useState("50");
   const [referralSaving, setReferralSaving] = useState(false);
   const [upstreamBalance, setUpstreamBalance] = useState<UpstreamBalance | null>(null);
@@ -107,9 +99,9 @@ function AdminApp() {
     const { data } = supabase.auth.onAuthStateChange((_event, next) => setSession(next));
     return () => data.subscription.unsubscribe();
   }, []);
-  useEffect(() => { if (session) loadUsers(); }, [session, page, query]);
-  useEffect(() => { if (session) void loadModels(); }, [session]);
-  useEffect(() => { if (!session) return; void loadUpstreamBalance(); const timer = window.setInterval(() => void loadUpstreamBalance(), 30_000); return () => window.clearInterval(timer); }, [session]);
+  useEffect(() => { if (session && adminPage === "users") void loadUsers(); }, [session, page, query, adminPage]);
+  useEffect(() => { if (session && adminPage === "models") void loadModels(); }, [session, adminPage]);
+  useEffect(() => { if (!session || adminPage !== "balance") return; void loadUpstreamBalance(); const timer = window.setInterval(() => void loadUpstreamBalance(), 30_000); return () => window.clearInterval(timer); }, [session, adminPage]);
 
   async function request(path = "", init?: RequestInit) {
     const response = await functionRequest(`admin-users${path}`, init);
@@ -203,18 +195,6 @@ function AdminApp() {
     } catch (cause) { const code=cause instanceof Error?cause.message:""; setError(errors[code] || code || "密码重设失败。"); }
     finally { setPasswordSaving(false); }
   }
-  function beginPlanEdit(plan?: Plan) {
-    setEditingPlanId(plan?.id || "new"); setPlanName(plan?.name || "");
-    setPlanCredits(String(plan?.monthly_credits ?? 100)); setPlanDefault(plan?.is_default || false); setError("");
-  }
-  async function savePlan(event: React.FormEvent) {
-    event.preventDefault(); setSavingPlan(true); setError("");
-    try {
-      await request("", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "savePlan", planId: editingPlanId === "new" ? null : editingPlanId, name: planName, monthlyCredits: Number(planCredits), isDefault: planDefault }) });
-      setEditingPlanId(null); await loadUsers();
-    } catch (cause) { const code=cause instanceof Error?cause.message:""; setError(errors[code] || code || "套餐保存失败。"); }
-    finally { setSavingPlan(false); }
-  }
   async function saveReferralBonus(event: React.FormEvent) {
     event.preventDefault(); setReferralSaving(true); setError("");
     try { await request("", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "saveReferralBonus", signupBonus: Number(referralBonus) }) }); }
@@ -231,13 +211,11 @@ function AdminApp() {
   const modelGroups = visibleModels.reduce<Record<string, CatalogModel[]>>((groups, item) => { (groups[item.provider] ||= []).push(item); return groups; }, {});
   const formatQuota = (value: number) => new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 2 }).format(value);
   return <div className="admin-app">
-    <aside className="admin-nav"><div className="admin-logo"><img src="/brand/shidea-mark.png" alt="" /><div>识谛<strong>CONTROL</strong></div></div><nav><button className={adminPage === "users" ? "active" : ""} onClick={() => setAdminPage("users")}><Users size={17}/>用户与额度</button><button className={adminPage === "feedback" ? "active" : ""} onClick={() => setAdminPage("feedback")}><MessageSquare size={17}/>反馈待办</button></nav><div className="admin-nav-foot"><span>{session.user.email}</span><button onClick={() => supabase.auth.signOut()}><LogOut size={15}/>退出</button></div></aside>
-    {adminPage === "feedback" ? <FeedbackAdmin /> : <main className="admin-main"><header><div><span>OPERATIONS</span><h1>用户额度管理</h1><p>管理套餐、积分余额并审计每一次人工调整。</p></div><div className="admin-header-stats"><div className="admin-stat"><Users size={18}/><span>注册用户<strong>{total}</strong></span></div><section className="admin-upstream-balance"><Coins size={18}/><div><span>Apilio 账户余额</span><strong>{upstreamBalance ? upstreamBalance.unlimited ? "不限额" : `US$ ${upstreamBalance.availableAmountUsd.toFixed(2)}` : balanceLoading ? "读取中…" : "—"}</strong><small>{upstreamBalance ? `${upstreamBalance.name} · 剩余 ${formatQuota(upstreamBalance.totalAvailable)} 额度 · 已用 US$ ${upstreamBalance.usedAmountUsd.toFixed(2)}` : "每 30 秒自动刷新"}</small></div><button type="button" onClick={() => void loadUpstreamBalance()} disabled={balanceLoading}>{balanceLoading ? "刷新中" : "刷新"}</button></section></div></header>
+    <aside className="admin-nav"><div className="admin-logo"><img src="/brand/shidea-mark.png" alt="" /><div>识谛<strong>CONTROL</strong></div></div><nav><button className={adminPage === "users" ? "active" : ""} onClick={() => setAdminPage("users")}><Users size={17}/>用户与积分</button><button className={adminPage === "models" ? "active" : ""} onClick={() => setAdminPage("models")}><Sparkles size={17}/>模型权限</button><button className={adminPage === "balance" ? "active" : ""} onClick={() => setAdminPage("balance")}><Coins size={17}/>Apilio 余额</button><button className={adminPage === "feedback" ? "active" : ""} onClick={() => setAdminPage("feedback")}><MessageSquare size={17}/>反馈待办</button></nav><div className="admin-nav-foot"><span>{session.user.email}</span><button onClick={() => supabase.auth.signOut()}><LogOut size={15}/>退出</button></div></aside>
+    {adminPage === "feedback" ? <FeedbackAdmin /> : adminPage === "models" ? <main className="admin-main"><header><div><span>MODEL ACCESS</span><h1>模型权限</h1><p>分别定义 Free 与 Pro 用户可使用的模型。</p></div></header>{error && <div className="admin-alert"><ShieldCheck size={17}/>{error}</div>}<section className="model-management admin-page-card"><div className="model-management-head"><div><span>FREE / PRO</span><h2>可用模型配置</h2><p>Free 用户可见全部模型，但只能选择标记为 Free 的模型；Pro 可使用标记为 Pro 的模型。</p></div><div><button type="button" className="admin-refresh" onClick={loadModels} disabled={modelsLoading || modelsSaving}>{modelsLoading ? "读取中…" : "刷新列表"}</button><button type="button" className="admin-save-models" onClick={saveModels} disabled={modelsLoading || modelsSaving || !catalogModels.length}>{modelsSaving ? "正在保存…" : "保存模型权限"}</button></div></div>{!modelsLoading && <div className="model-search"><Search size={16}/><input value={modelSearch} onChange={event => setModelSearch(event.target.value)} placeholder="搜索模型、模型 ID 或厂商" /><span>Free {freeModelIds.size} · Pro {selectedModelIds.size}</span></div>}{modelsLoading ? <p className="model-empty">正在从模型服务读取列表…</p> : <div className="model-provider-groups">{Object.entries(modelGroups).map(([provider, items]) => <details key={provider} open><summary><span>{provider}</span><b>{items.length} 个模型</b></summary><div>{items.map(item => <div key={item.id} className="model-option"><span>{item.name}<small>{item.id}</small></span><label>Free<input type="checkbox" checked={freeModelIds.has(item.id)} onChange={() => toggleFreeModel(item.id)} /></label><label>Pro<input type="checkbox" checked={selectedModelIds.has(item.id)} onChange={() => toggleModel(item.id)} /></label></div>)}</div></details>)}{!visibleModels.length && <p className="model-empty">没有匹配的模型</p>}</div>}</section></main> : adminPage === "balance" ? <main className="admin-main"><header><div><span>APILIO ACCOUNT</span><h1>账户余额</h1><p>余额仅在本页面打开时每 30 秒自动更新。</p></div><button className="admin-refresh" onClick={() => void loadUpstreamBalance()} disabled={balanceLoading}>{balanceLoading ? "刷新中…" : "立即刷新"}</button></header>{error && <div className="admin-alert"><ShieldCheck size={17}/>{error}</div>}<section className="admin-balance-page">{upstreamBalance ? <><div className="admin-balance-primary"><span>当前可用余额</span><strong>{upstreamBalance.unlimited ? "不限额" : `US$ ${upstreamBalance.availableAmountUsd.toFixed(2)}`}</strong><small>{upstreamBalance.name} · 最近更新 {balanceCheckedAt ? new Date(balanceCheckedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—"}</small></div><div className="admin-balance-grid"><article><span>剩余额度</span><strong>{formatQuota(upstreamBalance.totalAvailable)}</strong><small>按当前 Apilio 账户配额</small></article><article><span>已使用金额</span><strong>US$ {upstreamBalance.usedAmountUsd.toFixed(2)}</strong><small>累计账户使用量</small></article><article><span>已发放额度</span><strong>{formatQuota(upstreamBalance.totalGranted)}</strong><small>额度单位：{formatQuota(upstreamBalance.quotaPerUsd)} / US$1</small></article></div></> : <div className="admin-empty">{balanceLoading ? "正在读取 Apilio 账户余额…" : "暂无余额数据，请点击立即刷新。"}</div>}</section></main> : <main className="admin-main"><header><div><span>USER OPERATIONS</span><h1>用户与积分</h1><p>管理用户积分、会员状态与人工调整记录。</p></div><div className="admin-header-stats"><div className="admin-stat"><Users size={18}/><span>注册用户<strong>{total}</strong></span></div></div></header>
       <section className="admin-toolbar"><form onSubmit={event => { event.preventDefault(); setPage(1); setQuery(search); }}><Search size={17}/><input placeholder="搜索邮箱、用户名" value={search} onChange={event => setSearch(event.target.value)}/><button>搜索</button></form><button className="admin-refresh" onClick={loadUsers}>刷新数据</button></section>
       {error && <div className="admin-alert"><ShieldCheck size={17}/>{error}</div>}
-      <section className="plan-management"><div className="plan-management-head"><div><span>新用户默认套餐</span><h2>套餐与初始额度</h2></div><button className="admin-add-plan" onClick={() => beginPlanEdit()}><Plus size={16}/>新增套餐</button></div><div className="plan-grid">{plans.map(plan => <article key={plan.id} className={plan.is_default ? "default-plan" : ""}><div><strong>{plan.name.toUpperCase()}</strong>{plan.is_default && <b>新用户默认</b>}</div><span>初始额度 <em>{Number(plan.monthly_credits).toLocaleString()} 分</em></span><button onClick={() => beginPlanEdit(plan)}>修改</button></article>)}</div>{editingPlanId && <form className="plan-editor" onSubmit={savePlan}><label>套餐名称<input required maxLength={32} value={planName} onChange={event => setPlanName(event.target.value)} placeholder="例如：team" /></label><label>新用户初始额度<input type="number" min="0" max="10000000" required value={planCredits} onChange={event => setPlanCredits(event.target.value)} /></label><label className="default-plan-toggle"><input type="checkbox" checked={planDefault} onChange={event => setPlanDefault(event.target.checked)} />设为新用户默认套餐</label><div><button type="button" onClick={() => setEditingPlanId(null)} disabled={savingPlan}>取消</button><button disabled={savingPlan}>{savingPlan ? "正在保存…" : "保存套餐"}</button></div></form>}</section>
       <section className="referral-management"><div><span>邀请码奖励</span><h2>注册奖励配置</h2><p>新用户注册时填写有效邀请码后，获得此处设置的额外 AI 额度。</p></div><form onSubmit={saveReferralBonus}><label>奖励额度<input type="number" min="0" max="10000000" required value={referralBonus} onChange={event => setReferralBonus(event.target.value)} /><small>分</small></label><button disabled={referralSaving}>{referralSaving ? "保存中…" : "保存奖励"}</button></form></section>
-      <section className="model-management"><div className="model-management-head"><div><span>模型会员权限</span><h2>Free 与 Pro 可用模型</h2><p>Free 用户可见全部模型，但只能选择标记为 Free 的模型；Pro 可使用标记为 Pro 的模型。</p></div><div><button type="button" className="admin-refresh" onClick={loadModels} disabled={modelsLoading || modelsSaving}>{modelsLoading ? "读取中…" : "刷新列表"}</button><button type="button" className="admin-save-models" onClick={saveModels} disabled={modelsLoading || modelsSaving || !catalogModels.length}>{modelsSaving ? "正在保存…" : "保存模型权限"}</button></div></div>{!modelsLoading && <div className="model-search"><Search size={16}/><input value={modelSearch} onChange={event => setModelSearch(event.target.value)} placeholder="搜索模型、模型 ID 或厂商" /><span>Free {freeModelIds.size} · Pro {selectedModelIds.size}</span></div>}{modelsLoading ? <p className="model-empty">正在从模型服务读取列表…</p> : <div className="model-provider-groups">{Object.entries(modelGroups).map(([provider, items]) => <details key={provider} open><summary><span>{provider}</span><b>{items.length} 个模型</b></summary><div>{items.map(item => <div key={item.id} className="model-option"><span>{item.name}<small>{item.id}</small></span><label>Free<input type="checkbox" checked={freeModelIds.has(item.id)} onChange={() => toggleFreeModel(item.id)} /></label><label>Pro<input type="checkbox" checked={selectedModelIds.has(item.id)} onChange={() => toggleModel(item.id)} /></label></div>)}</div></details>)}{!visibleModels.length && <p className="model-empty">没有匹配的模型</p>}</div>}</section>
       <section className="admin-table-wrap"><table><thead><tr><th>用户</th><th>套餐</th><th>剩余额度</th><th>邀请码 / 邀请</th><th>文献库</th><th>状态</th><th>注册时间</th><th></th></tr></thead><tbody>{users.map(item => <tr key={item.user_id}><td><strong>{item.display_name || item.username || "未命名用户"}</strong><span>{item.email}</span></td><td><b className="plan-pill">{(item.plan_name || "-").toUpperCase()}</b></td><td><strong className="credit-number">{Number(item.credits_remaining).toLocaleString()}</strong></td><td><div className="admin-referral-usage"><strong>{item.invite_code || "-"}</strong><span>{item.invited_by_email ? `受邀：${item.invited_by_email}` : "自主注册"}</span><em>已邀 {Number(item.successful_referral_count || 0)} 人 · 奖励 +{Number(item.referral_bonus_credits || 0)}</em></div></td><td><div className="admin-library-usage"><strong>{Number(item.library_paper_count || 0).toLocaleString()} 篇</strong><span>{formatStorage(Number(item.library_storage_bytes || 0))}</span></div></td><td><i className={item.status === "active" ? "status-active" : ""}>{item.status}</i></td><td>{new Date(item.created_at).toLocaleDateString("zh-CN")}</td><td><button className="row-action" onClick={() => openUser(item)}>管理</button></td></tr>)}</tbody></table>{!loading && !users.length && <div className="admin-empty">没有找到匹配用户</div>}{loading && <div className="admin-empty">正在加载…</div>}</section>
       <footer className="admin-pagination"><span>共 {total} 位用户</span><div><button disabled={page <= 1} onClick={() => setPage(value => value - 1)}><ChevronLeft size={16}/></button><b>{page} / {pages}</b><button disabled={page >= pages} onClick={() => setPage(value => value + 1)}><ChevronRight size={16}/></button></div></footer>
     </main>}
