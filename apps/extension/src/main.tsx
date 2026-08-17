@@ -474,7 +474,7 @@ function AuthDialog({
   </form></div>;
 }
 
-function AccountDialog({ session, usage, inviteCode, onClose, onSignOut, onOpenLibrary, onOpenFeedback }: { session: AuthSession; usage: Usage | null; inviteCode: string; onClose: () => void; onSignOut: () => void; onOpenLibrary: () => void; onOpenFeedback: () => void }) {
+function AccountDialog({ session, usage, inviteCode, onClose, onSignOut, onOpenLibrary, onOpenFeedback, onOpenPurchase }: { session: AuthSession; usage: Usage | null; inviteCode: string; onClose: () => void; onSignOut: () => void; onOpenLibrary: () => void; onOpenFeedback: () => void; onOpenPurchase: () => void }) {
   const displayName = String(session.user.user_metadata?.display_name || session.user.user_metadata?.username || "识谛用户");
   const initial = displayName.trim().slice(0, 1).toUpperCase() || "I";
   const creditAmount = usage?.creditsRemaining ?? 0;
@@ -483,12 +483,17 @@ function AccountDialog({ session, usage, inviteCode, onClose, onSignOut, onOpenL
     <div className="auth-brand"><img src="/brand/shidea-mark.png" alt="" /><span>识谛 <em>shidea</em></span></div>
     <div className="account-hero"><div className="account-avatar">{initial}</div><div><p>账户中心</p><h2>{displayName}</h2><span>{session.user.email}</span></div></div>
     <section className="account-credits"><div><span>可用 AI 额度</span><strong>{creditAmount}<small> 分</small></strong></div><div className="credit-orbit"><Sparkles size={19} /></div></section>
+    <button type="button" className="account-purchase" onClick={onOpenPurchase}><Plus size={16}/>购买 AI 额度</button>
     <div className="quota-summary"><span>当前套餐<strong>{usage?.plan ? usage.plan.toUpperCase() : "FREE"}</strong></span><span>结算日期<strong>{usage?.periodEnd ? new Date(usage.periodEnd).toLocaleDateString("zh-CN", { month: "short", day: "numeric" }) : "每月"}</strong></span></div>
     <section className="account-invite"><span>我的邀请码</span><strong>{inviteCode || "正在生成…"}</strong><small>好友注册时填写，即可获得后台设置的新人奖励。</small></section>
     <button type="button" className="account-library" onClick={onOpenLibrary}><span className="account-library-icon"><FolderOpen size={22}/></span><span className="account-library-copy"><small>个人文献工作台</small><strong>整理每一篇重要文献</strong><em>查看文献库、继续阅读与管理资料</em></span><ChevronRight size={19} /></button>
     <button type="button" className="account-feedback" onClick={onOpenFeedback}><MessageSquare size={16}/><span><small>共创识谛</small><strong>提交反馈与建议</strong></span><ChevronRight size={17}/></button>
     <button type="button" className="account-signout" onClick={onSignOut}><LogOut size={15} />退出登录</button>
   </section></div>;
+}
+
+function PurchaseDialog({ busy, error, onClose, onPurchase }: { busy: string; error: string; onClose: () => void; onPurchase: (code: string) => void }) {
+  return <div className="auth-backdrop"><section className="auth-dialog purchase-dialog"><button type="button" className="popover-close" onClick={onClose} disabled={Boolean(busy)}><X size={16}/></button><div className="auth-brand"><img src="/brand/shidea-mark.png" alt="" /><span>识谛 <em>shidea</em></span></div><div className="auth-heading"><h2>购买 AI 额度</h2><p>支付宝沙箱测试订单，不会产生真实扣款。</p></div><div className="purchase-options"><button disabled={Boolean(busy)} onClick={() => onPurchase("sandbox-mini")}><span>沙箱测试</span><strong>100 分</strong><em>¥0.01</em></button><button disabled={Boolean(busy)} onClick={() => onPurchase("sandbox-plus")}><span>沙箱测试</span><strong>1,000 分</strong><em>¥0.10</em></button></div>{error && <p className="auth-feedback error">{error}</p>}{busy && <p className="auth-notice purchase-loading"><RefreshCw className="auth-spinner" size={15}/>{busy}</p>}<small className="purchase-note">支付成功后，额度由支付宝异步通知确认并自动到账。</small></section></div>;
 }
 
 function FeedbackScreen({ session, onBack }: { session: AuthSession; onBack: () => void }) {
@@ -500,6 +505,34 @@ function FeedbackScreen({ session, onBack }: { session: AuthSession; onBack: () 
     setSaving(false);
   }
   return <main className="feedback-page"><header><button onClick={onBack}><ChevronLeft size={17}/>返回</button><div className="feedback-brand"><img src="/brand/shidea-mark.png" alt="" />识谛 <em>shidea</em></div></header><section className="feedback-card"><p>SHIDEA / CO-CREATION</p><h1>每一条反馈，<br/>都在帮我们把识谛做得更好。</h1><div className="feedback-copy"><span>你好，{String(session.user.user_metadata?.display_name || session.user.user_metadata?.username || "阅读者")}。</span><span>我们仍在学习如何让阅读更安静、更清晰。无论是一个困扰、一个遗漏，还是一点灵感，都很珍贵。谢谢你愿意把它交给我们。</span></div><form onSubmit={submit}><label>反馈类型<select value={category} onChange={event => setCategory(event.target.value)}><option value="suggestion">功能建议</option><option value="bug">问题反馈</option><option value="other">其他想法</option></select></label><label>想和我们说些什么？<textarea required minLength={5} maxLength={2000} value={content} onChange={event => setContent(event.target.value)} placeholder="请尽量描述使用场景，这会帮助我们更好地理解你。" /></label>{message && <p className="feedback-message">{message}</p>}<button disabled={saving}>{saving ? "正在认真收下…" : "提交这条反馈"}<ChevronRight size={17}/></button></form></section></main>;
+}
+
+function PaymentResultScreen() {
+  const params = new URL(window.location.href).searchParams;
+  const orderNo = params.get("out_trade_no") || "";
+  // The browser redirect is informational only; credits are shown as paid
+  // solely after the server has accepted Alipay's signed notification.
+  const [status, setStatus] = useState(params.get("payment") === "failed" ? "failed" : "pending");
+  const [syncError, setSyncError] = useState("");
+  useEffect(() => {
+    if (!orderNo || status === "success" || status === "failed") return;
+    let active = true;
+    const check = async () => {
+      try {
+        const response = await functionRequest(`alipay-payment?outTradeNo=${encodeURIComponent(orderNo)}`);
+        const result = await response.json();
+        if (!active) return;
+        if (response.ok && result.order?.status === "paid") setStatus("success");
+        else if (response.ok && result.order?.status === "closed") setStatus("failed");
+        else if (!response.ok) setSyncError("订单仍在确认中，请稍后返回账户查看额度。");
+      } catch { if (active) setSyncError("订单仍在确认中，请稍后返回账户查看额度。"); }
+    };
+    void check(); const timer = window.setInterval(() => void check(), 3000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [orderNo, status]);
+  const success = status === "success";
+  const failed = status === "failed";
+  return <main className="payment-result-page"><section className="payment-result-card"><img src="/brand/shidea-mark.png" alt="识谛 shidea" /><div className={`payment-result-icon ${success ? "success" : failed ? "failed" : "pending"}`}>{success ? <Check size={30}/> : failed ? <X size={30}/> : <RefreshCw size={29}/>}</div><p>SHIDEA / PAYMENT</p><h1>{success ? "支付已完成" : failed ? "支付未完成" : "正在确认支付结果"}</h1><span>{success ? "额度已自动同步到你的账户。" : failed ? "本次支付没有完成扣款。你可以返回后重新发起支付。" : "请稍候，我们正在向服务器确认这笔订单。不要重复付款。"}</span>{syncError && <small className="payment-sync-error">{syncError}</small>}{orderNo && <small>订单号：{orderNo}</small>}<a href="/">返回识谛</a><em>支付结果以支付宝异步通知和账户额度为准。</em></section></main>;
 }
 
 function UrlImportDialog({ value, error, loading, onChange, onClose, onSubmit }: { value: string; error: string; loading: boolean; onChange: (value: string) => void; onClose: () => void; onSubmit: () => void }) {
@@ -1449,6 +1482,9 @@ function App() {
   const [paperStateLoaded, setPaperStateLoaded] = useState(true);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [purchaseOpen, setPurchaseOpen] = useState(false);
+  const [purchaseBusy, setPurchaseBusy] = useState("");
+  const [purchaseError, setPurchaseError] = useState("");
   const [notices, setNotices] = useState<AppNotice[]>([]);
   const [usage, setUsage] = useState<Usage | null>(null);
   const [authOpen, setAuthOpen] = useState(false);
@@ -1901,6 +1937,14 @@ function App() {
     if (session) window.sessionStorage.removeItem(`shidea-active-paper:${session.user.id}`);
     setSession(null); setUsage(null);
     await supabase.auth.signOut();
+  }
+  async function purchaseCredits(productCode: string) {
+    setPurchaseError(""); setPurchaseBusy("正在创建支付宝订单…");
+    try {
+      const response = await functionRequest("alipay-payment", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ productCode }) });
+      const result = await response.json(); if (!response.ok || !result.paymentUrl) throw new Error(result.error || "PAYMENT_REQUEST_FAILED");
+      window.location.assign(result.paymentUrl);
+    } catch (error) { const message=error instanceof Error?error.message:"PAYMENT_REQUEST_FAILED"; setPurchaseError(message === "PRODUCT_NOT_FOUND" ? "该额度包暂不可购买。" : "无法创建支付订单，请检查沙箱配置后重试。"); setPurchaseBusy(""); }
   }
   useEffect(() => {
     const close = (event: KeyboardEvent) => {
@@ -2495,7 +2539,8 @@ function App() {
           onOpenLibrary={() => session ? setLibraryOpen(true) : setAuthOpen(true)}
         />
         <input ref={fileInput} className="welcome-file-input" type="file" accept="application/pdf" onChange={(event) => event.target.files?.[0] && openFile(event.target.files[0])} />
-        {authOpen && (session ? <AccountDialog session={session} usage={usage} inviteCode={inviteCode} onClose={() => setAuthOpen(false)} onSignOut={() => { signOut(); setAuthOpen(false); }} onOpenLibrary={() => { setAuthOpen(false); setLibraryOpen(true); }} onOpenFeedback={() => { setAuthOpen(false); setFeedbackOpen(true); }} /> : <AuthDialog mode={authMode} email={authEmail} password={authPassword} passwordConfirm={authPasswordConfirm} name={authName} inviteCode={authInviteCode} code={authCode} error={authError} notice={authNotice} verifying={authVerifying} resetting={authResetting} resetVerifying={authResetVerifying} busy={authBusy} busyLabel={authBusyLabel} onClose={() => setAuthOpen(false)} onSubmit={submitAuth} onVerify={verifyEmailCode} onResend={resendEmailCode} onResetRequest={requestPasswordReset} onResetVerify={resetPassword} onResetResend={requestPasswordReset} onOpenReset={beginPasswordReset} onBackToLogin={backToLogin} onModeChange={(nextMode) => { setAuthMode(nextMode); setAuthVerifying(false); setAuthResetting(false); setAuthResetVerifying(false); setAuthError(""); setAuthNotice(""); }} onEmail={setAuthEmail} onPassword={setAuthPassword} onPasswordConfirm={setAuthPasswordConfirm} onName={setAuthName} onInviteCode={setAuthInviteCode} onCode={setAuthCode} />)}
+        {authOpen && (session ? <AccountDialog session={session} usage={usage} inviteCode={inviteCode} onClose={() => setAuthOpen(false)} onSignOut={() => { signOut(); setAuthOpen(false); }} onOpenLibrary={() => { setAuthOpen(false); setLibraryOpen(true); }} onOpenFeedback={() => { setAuthOpen(false); setFeedbackOpen(true); }} onOpenPurchase={() => { setAuthOpen(false); setPurchaseOpen(true); }} /> : <AuthDialog mode={authMode} email={authEmail} password={authPassword} passwordConfirm={authPasswordConfirm} name={authName} inviteCode={authInviteCode} code={authCode} error={authError} notice={authNotice} verifying={authVerifying} resetting={authResetting} resetVerifying={authResetVerifying} busy={authBusy} busyLabel={authBusyLabel} onClose={() => setAuthOpen(false)} onSubmit={submitAuth} onVerify={verifyEmailCode} onResend={resendEmailCode} onResetRequest={requestPasswordReset} onResetVerify={resetPassword} onResetResend={requestPasswordReset} onOpenReset={beginPasswordReset} onBackToLogin={backToLogin} onModeChange={(nextMode) => { setAuthMode(nextMode); setAuthVerifying(false); setAuthResetting(false); setAuthResetVerifying(false); setAuthError(""); setAuthNotice(""); }} onEmail={setAuthEmail} onPassword={setAuthPassword} onPasswordConfirm={setAuthPasswordConfirm} onName={setAuthName} onInviteCode={setAuthInviteCode} onCode={setAuthCode} />)}
+        {purchaseOpen && <PurchaseDialog busy={purchaseBusy} error={purchaseError} onClose={() => { setPurchaseOpen(false); setPurchaseError(""); }} onPurchase={purchaseCredits} />}
         {urlOpen && <UrlImportDialog value={paperUrl} error={urlError} loading={urlLoading} onChange={value => { setPaperUrl(value); setUrlError(""); }} onClose={() => setUrlOpen(false)} onSubmit={openPdfUrl} />}
         {!embeddedReader && <ExtensionAutoOpenToggle />}
       </div>
@@ -2860,11 +2905,13 @@ function App() {
         </aside>
       </main>
       <NoticeStack notices={notices} onDismiss={dismissNotice}/>
-      {authOpen && (session ? <AccountDialog session={session} usage={usage} inviteCode={inviteCode} onClose={() => setAuthOpen(false)} onSignOut={() => { signOut(); setAuthOpen(false); }} onOpenLibrary={() => { setAuthOpen(false); setLibraryOpen(true); }} onOpenFeedback={() => { setAuthOpen(false); setFeedbackOpen(true); }} /> : <AuthDialog mode={authMode} email={authEmail} password={authPassword} passwordConfirm={authPasswordConfirm} name={authName} inviteCode={authInviteCode} code={authCode} error={authError} notice={authNotice} verifying={authVerifying} resetting={authResetting} resetVerifying={authResetVerifying} busy={authBusy} busyLabel={authBusyLabel} onClose={() => setAuthOpen(false)} onSubmit={submitAuth} onVerify={verifyEmailCode} onResend={resendEmailCode} onResetRequest={requestPasswordReset} onResetVerify={resetPassword} onResetResend={requestPasswordReset} onOpenReset={beginPasswordReset} onBackToLogin={backToLogin} onModeChange={(nextMode) => { setAuthMode(nextMode); setAuthVerifying(false); setAuthResetting(false); setAuthResetting(false); setAuthResetVerifying(false); setAuthError(""); setAuthNotice(""); }} onEmail={setAuthEmail} onPassword={setAuthPassword} onPasswordConfirm={setAuthPasswordConfirm} onName={setAuthName} onInviteCode={setAuthInviteCode} onCode={setAuthCode} />)}
+      {authOpen && (session ? <AccountDialog session={session} usage={usage} inviteCode={inviteCode} onClose={() => setAuthOpen(false)} onSignOut={() => { signOut(); setAuthOpen(false); }} onOpenLibrary={() => { setAuthOpen(false); setLibraryOpen(true); }} onOpenFeedback={() => { setAuthOpen(false); setFeedbackOpen(true); }} onOpenPurchase={() => { setAuthOpen(false); setPurchaseOpen(true); }} /> : <AuthDialog mode={authMode} email={authEmail} password={authPassword} passwordConfirm={authPasswordConfirm} name={authName} inviteCode={authInviteCode} code={authCode} error={authError} notice={authNotice} verifying={authVerifying} resetting={authResetting} resetVerifying={authResetVerifying} busy={authBusy} busyLabel={authBusyLabel} onClose={() => setAuthOpen(false)} onSubmit={submitAuth} onVerify={verifyEmailCode} onResend={resendEmailCode} onResetRequest={requestPasswordReset} onResetVerify={resetPassword} onResetResend={requestPasswordReset} onOpenReset={beginPasswordReset} onBackToLogin={backToLogin} onModeChange={(nextMode) => { setAuthMode(nextMode); setAuthVerifying(false); setAuthResetting(false); setAuthResetVerifying(false); setAuthError(""); setAuthNotice(""); }} onEmail={setAuthEmail} onPassword={setAuthPassword} onPasswordConfirm={setAuthPasswordConfirm} onName={setAuthName} onInviteCode={setAuthInviteCode} onCode={setAuthCode} />)}
+      {purchaseOpen && <PurchaseDialog busy={purchaseBusy} error={purchaseError} onClose={() => { setPurchaseOpen(false); setPurchaseError(""); }} onPurchase={purchaseCredits} />}
       {urlOpen && <UrlImportDialog value={paperUrl} error={urlError} loading={urlLoading} onChange={value => { setPaperUrl(value); setUrlError(""); }} onClose={() => setUrlOpen(false)} onSubmit={openPdfUrl} />}
       {!embeddedReader && <ExtensionAutoOpenToggle />}
     </div>
   );
 }
 if (window.location.pathname === "/admin" || window.location.pathname.startsWith("/admin/")) mountAdmin();
+else if (new URL(window.location.href).searchParams.has("payment") || new URL(window.location.href).searchParams.has("out_trade_no")) createRoot(document.getElementById("root")!).render(<PaymentResultScreen />);
 else createRoot(document.getElementById("root")!).render(<App />);

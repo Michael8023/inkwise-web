@@ -22,6 +22,10 @@ verify_jwt = false
 verify_jwt = false
 [functions.reset-password]
 verify_jwt = false
+[functions.alipay-payment]
+verify_jwt = true
+[functions.alipay-notify]
+verify_jwt = false
 [functions.admin-users]
 verify_jwt = true
 [functions.ai-visual]
