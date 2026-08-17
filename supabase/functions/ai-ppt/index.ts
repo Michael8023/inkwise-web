@@ -37,7 +37,10 @@ Deno.serve(async (req) => {
     const action = clean(input.action, 20) as Action;
     if (!Object.hasOwn(paths, action)) throw new Error("PPT_ACTION_INVALID");
     const request = input.request && typeof input.request === "object" ? input.request as Record<string, unknown> : {};
-    const baseUrl = (Deno.env.get("APILIO_BASE_URL") || "https://api.apilio.ai/v1").replace(/\/+$/, "");
+    // Chat-completions uses APILIO_BASE_URL ending in /v1, while DocMee is
+    // mounted at the Apilio root as /docmee/v1/… . Normalize both deployments.
+    const configuredBaseUrl = (Deno.env.get("APILIO_BASE_URL") || "https://api.apilio.ai/v1").replace(/\/+$/, "");
+    const baseUrl = configuredBaseUrl.replace(/\/v1$/, "");
     const apiKey = Deno.env.get("APILIO_API_KEY");
     if (!apiKey) throw new Error("APILIO_NOT_CONFIGURED");
     const wantsStream = Boolean(request.stream) && (action === "outline" || action === "content");
