@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { CheckCircle2, FileText, Presentation, RefreshCw, ShieldCheck, Sparkles } from "lucide-react";
 import { DocmeeUI } from "@docmee/sdk-ui";
 import { functionRequest } from "./api";
-import type { LibraryPaper } from "./library";
+import { loadPaperState, type LibraryPaper } from "./library";
 
 type DocmeeToken = { token: string; expireTime?: number };
 type DocmeeMessage = { type?: string; data?: { id?: string; name?: string; message?: string } };
@@ -21,9 +21,10 @@ function materialForDocmee(title: string, prompt: string, source: string) {
     "## 学术演示制作约束（必须遵守）",
     "- 仅使用下方已确认的论文资料；不得编造研究结论、实验设置、数值、单位、样本量或显著性。",
     "- 所有实验数据必须原样保留：数值、单位、误差、p 值、样本量和比较对象不得改写或合并。资料未明确时标为“原文未说明”。",
+    "- 对资料中的每个 Markdown 表格：保留列名、行名和单元格数值，并在结果部分生成对应的数据表或图表；不可省略为普通文字描述。",
     "- 采用简洁、专业的学术汇报视觉风格；每页只表达一个核心论点，实验结果优先采用图表或表格。",
     `- 用户要求：${prompt.trim() || "突出研究问题、方法、实验结果、局限性和结论。"}`,
-    "## 已确认的 PDF 资料（作为唯一事实来源）",
+    "## 已确认的 MinerU 版面分析 Markdown（作为唯一事实来源）",
     evidence,
   ].join("\n\n");
 }
@@ -44,6 +45,7 @@ export function PptStudio({ papers, extractText }: { papers: LibraryPaper[]; ext
   const [paperId, setPaperId] = useState("");
   const [prompt, setPrompt] = useState("");
   const [source, setSource] = useState("");
+  const [sourceKind, setSourceKind] = useState<"markdown" | "text" | null>(null);
   const [confirmed, setConfirmed] = useState(false);
   const [phase, setPhase] = useState<"review" | "launching" | "creator">("review");
   const [message, setMessage] = useState("");
@@ -60,9 +62,13 @@ export function PptStudio({ papers, extractText }: { papers: LibraryPaper[]; ext
     if (!paper) return;
     setError(""); setMessage(""); setConfirmed(false); setPhase("review");
     try {
-      const extracted = await extractText(paper);
+      const layoutState = await loadPaperState(paper.id);
+      const markdown = typeof layoutState?.layout_result?.markdown === "string" ? layoutState.layout_result.markdown : "";
+      const extracted = markdown.trim() || await extractText(paper);
       if (!extracted.trim()) throw new Error("未能从该 PDF 提取文字，请在阅读器中重新解析文档后再试。");
       setSource(extracted.slice(0, maxMaterialCharacters));
+      setSourceKind(markdown.trim() ? "markdown" : "text");
+      if (!markdown.trim()) setMessage("未找到已保存的版面分析 Markdown，当前使用 PDF 纯文本；请先在阅读器中完成“智能版面分析”以保留实验表格。");
       if (extracted.length > maxMaterialCharacters) setMessage(`已载入前 ${maxMaterialCharacters.toLocaleString("zh-CN")} 个字符。请在下方删除无关内容，并保留实验结果、表格和图注后再确认。`);
     } catch (caught) { setError(caught instanceof Error ? caught.message : "PDF 资料读取失败"); }
   }
@@ -111,8 +117,8 @@ export function PptStudio({ papers, extractText }: { papers: LibraryPaper[]; ext
     {phase !== "creator" && <section className="docmee-review">
       <label>选择 PDF<select value={paperId} onChange={event => { setPaperId(event.target.value); setSource(""); setConfirmed(false); }}><option value="">请选择文献</option>{usablePapers.map(item => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label>
       <label className="docmee-prompt">制作要求<textarea value={prompt} onChange={event => setPrompt(event.target.value)} maxLength={800} placeholder="例如：面向组会汇报，10 页以内；突出消融实验和统计显著性。" /></label>
-      <button className="ppt-generate" type="button" disabled={!paper} onClick={() => void loadSource()}><RefreshCw size={16}/>读取并核验 PDF 资料</button>
-      {source && <><div className="docmee-evidence"><div><b><ShieldCheck size={16}/>数据保真核验</b><small>以下内容会原样作为 Agent 的唯一事实来源。请删除无关文字，补全或修正识别错误的实验数据。</small></div>{dataCandidates.length > 0 && <p><strong>识别到的数值/统计项：</strong>{dataCandidates.map(value => <code key={value}>{value}</code>)}</p>}<textarea value={source} onChange={event => { setSource(event.target.value.slice(0, maxMaterialCharacters)); setConfirmed(false); }} /></div>
+      <button className="ppt-generate" type="button" disabled={!paper} onClick={() => void loadSource()}><RefreshCw size={16}/>读取版面分析资料并核验</button>
+      {source && <><div className="docmee-evidence"><div><b><ShieldCheck size={16}/>数据保真核验</b><small>{sourceKind === "markdown" ? "已使用 MinerU 版面分析 Markdown；Markdown 表格会作为结果页数据表/图表的强制依据。" : "当前为 PDF 纯文本，表格行列可能已经丢失；请先运行智能版面分析。"}</small></div>{dataCandidates.length > 0 && <p><strong>识别到的数值/统计项：</strong>{dataCandidates.map(value => <code key={value}>{value}</code>)}</p>}<textarea value={source} onChange={event => { setSource(event.target.value.slice(0, maxMaterialCharacters)); setConfirmed(false); }} /></div>
       <label className="docmee-confirm"><input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)} /><span><CheckCircle2 size={18}/>我已核验资料中的实验数据、单位、样本量及统计结论；生成时不得改写或虚构。</span></label>
       <button className="ppt-generate docmee-launch" type="button" disabled={!confirmed || phase === "launching"} onClick={() => void launchCreator()}><Sparkles size={17}/>{phase === "launching" ? "正在启动官方 Agent…" : "进入 Agent 精美设计与模板选择"}</button></>}
       {message && <p className="ppt-progress">{message}</p>}{error && <p className="ppt-error">{error}</p>}
