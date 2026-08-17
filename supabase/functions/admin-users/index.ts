@@ -101,6 +101,11 @@ Deno.serve(async req => {
           return { ...item, enabled: !!saved?.enabled, free_enabled: !!saved?.free_enabled, pro_enabled: !!saved?.pro_enabled };
         }) });
       }
+      if (url.searchParams.get("databaseStorage") === "1") {
+        const { data, error } = await db.rpc("admin_database_storage_stats");
+        if (error) throw error;
+        return json({ storage: data, checkedAt: new Date().toISOString() });
+      }
       if (url.searchParams.get("balance") === "1") return json({ balance: await upstreamBalance(), checkedAt: new Date().toISOString() });
       const detailUserId = url.searchParams.get("userId");
       if (detailUserId) {
