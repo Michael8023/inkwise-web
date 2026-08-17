@@ -1550,7 +1550,8 @@ body.is-resizing-panel * {
 .section-hint { margin: 0 0 8px; color: var(--text-muted); font-size: 12px; line-height: 1.55; }
 .ai-section .summary-result.reference-style { position: relative; max-height: 118px; overflow: hidden; padding: 7px 0 2px; font-size: 13px; line-height: 1.65; }
 .ai-section .summary-result.reference-style.open { max-height: none; }
-.ai-section .summary-result.reference-style:not(.open)::after { content: ""; position: absolute; right: 0; bottom: 0; left: 0; height: 54px; pointer-events: none; background: linear-gradient(to bottom, transparent, var(--surface) 92%); }
+.ai-section .summary-result.reference-style:not(.open)::after { content: ""; position: absolute; right: 0; bottom: 0; left: 0; height: 24px; pointer-events: none; background: var(--surface); box-shadow: 0 -10px 16px color-mix(in srgb, var(--surface) 82%, transparent); }
+.summary-streaming { color: var(--text-muted); font-size: 12px; }
 .ai-section .summary-result.reference-style :is(p, ul, ol) { margin: 0 0 8px; }
 .ai-section .summary-result.reference-style :is(h1, h2, h3) { margin: 0 0 6px; font-size: 14px; }
 .summary-tools { display: flex; justify-content: flex-end; gap: 1px; margin-top: 2px; }
@@ -1828,3 +1829,60 @@ body.is-resizing-panel * {
   .library-paper-list:not(.grid) .library-paper { min-height: 142px; }
   .library-paper-grid { min-height: 232px; }
 }
+
+/* Research thread in the library ------------------------------------------------ */
+.research-overview {
+  margin: 24px 0 0;
+  border: 1px solid #c9e5df;
+  border-radius: 14px;
+  background: linear-gradient(120deg, #f4fcfa, #f8fbff);
+  box-shadow: 0 8px 22px rgb(6 52 119 / .045);
+  padding: 17px 18px;
+}
+.research-overview-heading { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.research-overview-heading p { margin: 0 0 4px; color: #078b8e; font-size: 9px; font-weight: 800; letter-spacing: .15em; }
+.research-overview-heading h2 { margin: 0; color: #063477; font-size: 16px; }
+.research-overview-heading button { border: 1px solid #b9ded9; border-radius: 7px; background: #fff; color: #087d80; padding: 6px 9px; font-size: 11px; font-weight: 700; cursor: pointer; }
+.research-overview > p { max-width: 980px; margin: 11px 0 0; color: #456776; font-size: 12px; line-height: 1.75; white-space: pre-wrap; }
+.research-overview > p.empty { color: #78939d; }
+.research-overview textarea { width: 100%; min-height: 115px; resize: vertical; margin-top: 13px; border: 1px solid #b8deda; border-radius: 9px; background: #fff; color: #23465a; padding: 10px; font: inherit; font-size: 12px; line-height: 1.65; }
+.research-overview textarea:focus { outline: 2px solid rgb(7 139 142 / .2); border-color: #078b8e; }
+.research-overview-actions { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; color: #829aa1; font-size: 10px; }
+.research-overview-actions button { border: 0; border-radius: 7px; background: #078b8e; color: #fff; padding: 8px 10px; font-size: 11px; font-weight: 700; cursor: pointer; }
+.research-overview-actions button:disabled { opacity: .65; cursor: wait; }
+
+/* Brainstorm: evidence-backed research ideation in the reader sidebar. */
+.side-panel-tabs { overflow-x: auto; scrollbar-width: none; }
+.side-panel-tabs::-webkit-scrollbar { display: none; }
+.brainstorm-panel { padding: 14px 12px 20px; }
+.brainstorm-intro { border-radius: 12px; background: linear-gradient(135deg, color-mix(in srgb, var(--accent-soft) 84%, var(--surface)), color-mix(in srgb, #8da1f5 14%, var(--surface))); padding: 15px; }
+.brainstorm-intro > span { display: inline-flex; align-items: center; gap: 6px; color: var(--accent); font-size: 10px; font-weight: 800; letter-spacing: .1em; }
+.brainstorm-intro h2 { margin: 8px 0 5px; color: var(--text); font-size: 18px; letter-spacing: -.02em; }
+.brainstorm-intro p { margin: 0; color: var(--text-secondary); font-size: 12px; line-height: 1.6; }
+.brainstorm-profile,.brainstorm-sources,.brainstorm-result { margin-top: 13px; border: 1px solid color-mix(in srgb, var(--accent) 19%, var(--border)); border-radius: 10px; background: color-mix(in srgb, var(--surface) 88%, var(--accent-soft)); padding: 12px; }
+.brainstorm-profile > div,.brainstorm-result > div,.brainstorm-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.brainstorm-profile strong,.brainstorm-sources strong,.brainstorm-result strong { color: var(--text); font-size: 12px; }
+.brainstorm-profile > div > button { border: 0; background: transparent; color: var(--accent); padding: 0; font-size: 11px; font-weight: 700; cursor: pointer; }
+.brainstorm-profile > p { max-height: 112px; overflow: auto; margin: 8px 0 0; color: var(--text-secondary); font-size: 12px; line-height: 1.65; white-space: pre-wrap; }
+.brainstorm-profile-empty p,.brainstorm-muted { margin: 8px 0 0; color: var(--text-muted); font-size: 11px; line-height: 1.6; }
+.brainstorm-profile-empty button { margin-top: 8px; border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border)); border-radius: 6px; background: var(--surface); color: var(--accent); padding: 6px 8px; font-size: 11px; font-weight: 700; cursor: pointer; }
+.brainstorm-section-heading small { color: var(--text-muted); font-size: 10px; }
+.brainstorm-current,.brainstorm-library-list label { display: flex; align-items: flex-start; gap: 8px; cursor: pointer; }
+.brainstorm-current { margin-top: 10px; border-radius: 7px; background: color-mix(in srgb, var(--accent) 8%, transparent); padding: 8px; color: var(--text-secondary); font-size: 11px; }
+.brainstorm-current input,.brainstorm-library-list input { accent-color: var(--accent); margin: 2px 0 0; }
+.brainstorm-current span,.brainstorm-library-list span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.brainstorm-current b { margin-right: 6px; color: var(--accent); font-size: 10px; }
+.brainstorm-library-list { display: grid; gap: 3px; max-height: 188px; overflow-y: auto; margin-top: 5px; }
+.brainstorm-library-list label { border-radius: 7px; padding: 7px 5px; color: var(--text-secondary); font-size: 11px; }
+.brainstorm-library-list label:hover { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.brainstorm-library-list label:has(input:disabled) { opacity: .52; cursor: not-allowed; }
+.brainstorm-library-list small { display: block; overflow: hidden; margin-top: 2px; color: var(--text-muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.brainstorm-run { width: 100%; display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 40px; margin-top: 13px; border: 0; border-radius: 9px; background: linear-gradient(105deg, var(--brand-700), var(--accent)); color: #fff; font-size: 12px; font-weight: 750; cursor: pointer; box-shadow: 0 9px 18px color-mix(in srgb, var(--accent) 20%, transparent); }
+.brainstorm-run:disabled { cursor: not-allowed; opacity: .54; box-shadow: none; }
+.brainstorm-result > div > button { display: grid; place-items: center; border: 0; border-radius: 5px; background: transparent; color: var(--text-muted); padding: 4px; cursor: pointer; }
+.brainstorm-result > div > button:hover { background: var(--accent-soft); color: var(--accent); }
+.brainstorm-result > :not(div) { color: var(--text-secondary); font-size: 12px; line-height: 1.7; }
+.brainstorm-result :is(h1,h2,h3) { color: var(--text); font-size: 13px; margin: 15px 0 7px; }
+.brainstorm-result :is(p,ul,ol) { margin: 7px 0; padding-left: 18px; }
+.brainstorm-empty { min-height: 260px; display: grid; place-content: center; justify-items: center; gap: 9px; padding: 26px; color: var(--text-muted); text-align: center; }
+.brainstorm-empty svg { color: var(--accent); }.brainstorm-empty strong { color: var(--text); font-size: 14px; }.brainstorm-empty p { margin: 0; font-size: 12px; line-height: 1.65; }

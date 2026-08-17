@@ -8,6 +8,8 @@ verify_jwt = true
 verify_jwt = true
 [functions.ai-chat]
 verify_jwt = true
+[functions.ai-brainstorm]
+verify_jwt = true
 [functions.translate]
 verify_jwt = false
 [functions.usage]

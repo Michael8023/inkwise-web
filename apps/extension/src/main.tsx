@@ -4,7 +4,7 @@ import ReactMarkdown from "react-markdown";
 import * as pdfjsLib from "pdfjs-dist";
 import JSZip from "jszip";
 import { functionRequest, supabase, supabaseConfigured } from "./api";
-import { LibraryScreen, type LibraryPaper, loadPaperState } from "./library";
+import { LibraryScreen, listBrainstormPapers, type LibraryPaper, loadPaperState } from "./library";
 import {
   ChevronDown,
   ChevronLeft,
@@ -43,6 +43,7 @@ import {
   Download,
   StickyNote,
   FilePlus2,
+  Brain,
 } from "lucide-react";
 import "./style.css";
 import { mountAdmin } from "./admin";
@@ -104,6 +105,11 @@ type ChatMessage = { role: "user" | "assistant"; content: string };
 type AuthSession = { user: { id: string; email?: string; user_metadata?: Record<string, unknown> } };
 type Usage = { plan: string; creditsRemaining: number; periodEnd: string | null };
 type AppNotice = { id: string; message: string; tone: "success" | "error" | "info"; leaving?: boolean };
+async function consumeAiStream(response: Response, onDelta: (delta: string) => void) {
+  if (!response.ok || !response.body) { const payload = await response.json().catch(() => ({})); throw new Error(payload.error || "AI_STREAM_FAILED"); }
+  const reader = response.body.getReader(), decoder = new TextDecoder(); let buffer = "";
+  while (true) { const { done, value } = await reader.read(); if (done) break; buffer += decoder.decode(value, { stream: true }); const events = buffer.split("\n\n"); buffer = events.pop() || ""; for (const rawEvent of events) { const line = rawEvent.split("\n").find(item => item.startsWith("data:")); if (!line) continue; const payload = JSON.parse(line.slice(5).trim()); if (payload.error) throw new Error(payload.error); if (payload.delta) onDelta(String(payload.delta)); } }
+}
 const PUBLIC_READER_ORIGIN = "https://www.inkwise.site";
 const MAX_PDF_IMPORT_BYTES = 128 * 1024 * 1024;
 const MAX_LIBRARY_PDF_BYTES = 50 * 1024 * 1024;
@@ -505,6 +511,31 @@ function FeedbackScreen({ session, onBack }: { session: AuthSession; onBack: () 
     setSaving(false);
   }
   return <main className="feedback-page"><header><button onClick={onBack}><ChevronLeft size={17}/>返回</button><div className="feedback-brand"><img src="/brand/shidea-mark.png" alt="" />识谛 <em>shidea</em></div></header><section className="feedback-card"><p>SHIDEA / CO-CREATION</p><h1>每一条反馈，<br/>都在帮我们把识谛做得更好。</h1><div className="feedback-copy"><span>你好，{String(session.user.user_metadata?.display_name || session.user.user_metadata?.username || "阅读者")}。</span><span>我们仍在学习如何让阅读更安静、更清晰。无论是一个困扰、一个遗漏，还是一点灵感，都很珍贵。谢谢你愿意把它交给我们。</span></div><form onSubmit={submit}><label>反馈类型<select value={category} onChange={event => setCategory(event.target.value)}><option value="suggestion">功能建议</option><option value="bug">问题反馈</option><option value="other">其他想法</option></select></label><label>想和我们说些什么？<textarea required minLength={5} maxLength={2000} value={content} onChange={event => setContent(event.target.value)} placeholder="请尽量描述使用场景，这会帮助我们更好地理解你。" /></label>{message && <p className="feedback-message">{message}</p>}<button disabled={saving}>{saving ? "正在认真收下…" : "提交这条反馈"}<ChevronRight size={17}/></button></form></section></main>;
+}
+
+function BrainstormPanel({ session, model, documentTitle, documentText, currentPaperId, onOpenLibrary, onUsage }: { session: AuthSession | null; model: string; documentTitle: string; documentText: string; currentPaperId: string; onOpenLibrary: () => void; onUsage: (remaining: number) => void }) {
+  const [overview, setOverview] = useState("");
+  const [papers, setPapers] = useState<LibraryPaper[]>([]);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState("");
+  const availablePapers = papers.filter(paper => !paper.archived_at && paper.id !== currentPaperId && Boolean(paper.document_text?.trim()));
+  useEffect(() => { if (!session) { setLoading(false); return; } let active = true; void Promise.all([supabase.from("research_profiles").select("overview").maybeSingle(), listBrainstormPapers()]).then(([profile, library]) => { if (!active) return; setOverview(profile.data?.overview || ""); setPapers(library); }).catch(() => { if (active) setResult("无法读取研究主线或文献库，请稍后重试。"); }).finally(() => { if (active) setLoading(false); }); return () => { active = false; }; }, [session]);
+  const togglePaper = (id: string) => setSelected(current => current.includes(id) ? current.filter(item => item !== id) : current.length >= 5 ? current : [...current, id]);
+  async function brainstorm() {
+    if (!session || !model || !overview.trim() || !documentText.trim()) return;
+    setRunning(true); setResult("");
+    try {
+      const extras = availablePapers.filter(paper => selected.includes(paper.id));
+      const response = await functionRequest("ai-brainstorm", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model, researchOverview: overview, sources: [{ title: documentTitle || "当前阅读文献", text: documentText.slice(0, 80000) }, ...extras.map(paper => ({ title: paper.title, text: paper.document_text!.slice(0, 16000) }))], requestId: crypto.randomUUID() }) });
+      const payload = await response.json(); if (!response.ok || !payload.text) throw new Error(payload.error || "AI_BRAINSTORM_FAILED");
+      setResult(payload.text); if (typeof payload.creditsRemaining === "number") onUsage(payload.creditsRemaining);
+    } catch (error) { setResult(readableApiError(error, "Brainstorm 暂时无法生成，请稍后重试。")); }
+    finally { setRunning(false); }
+  }
+  if (!session) return <div className="brainstorm-empty"><Brain size={28}/><strong>登录后开启 Brainstorm</strong><p>将你的研究主线与私有文献库连接起来，获得有依据的研究启发。</p></div>;
+  return <div className="panel-content brainstorm-panel"><section className="brainstorm-intro"><span><Brain size={16}/> RESEARCH BRAINSTORM</span><h2>从文献到你的下一步</h2><p>AI 会围绕你的研究主线，区分论文证据与可验证的推断。</p></section><section className="brainstorm-profile"><div><strong>当前研究主线</strong><button type="button" onClick={onOpenLibrary}>在工作台编辑</button></div>{loading ? <p>正在读取研究画像…</p> : overview ? <p>{overview}</p> : <div className="brainstorm-profile-empty"><p>尚未填写个人工作概述。先在文献工作台定义研究目标与约束，Brainstorm 才能给出贴合的建议。</p><button type="button" onClick={onOpenLibrary}>建立研究主线</button></div>}</section><section className="brainstorm-sources"><div className="brainstorm-section-heading"><strong>本次参考文献</strong><small>最多再选 5 篇</small></div><label className="brainstorm-current"><input type="checkbox" checked readOnly/><span><b>当前</b>{documentTitle || "当前阅读文献"}</span></label>{loading ? null : availablePapers.length ? <div className="brainstorm-library-list">{availablePapers.map(paper => <label key={paper.id}><input type="checkbox" checked={selected.includes(paper.id)} disabled={!selected.includes(paper.id) && selected.length >= 5} onChange={() => togglePaper(paper.id)}/><span>{paper.title}<small>{paper.page_count || "—"} 页 · 文献库</small></span></label>)}</div> : <p className="brainstorm-muted">文献库中暂无可分析的其他文献。</p>}</section><button className="brainstorm-run" onClick={() => void brainstorm()} disabled={running || !model || !overview.trim() || !documentText.trim()}>{running ? <><RefreshCw className="auth-spinner" size={16}/>正在连接研究线索…</> : <><Brain size={17}/>生成研究启发{selected.length ? ` · 另含 ${selected.length} 篇` : ""}</>}</button>{!model && <p className="brainstorm-muted">请先在 AI 助手中选择模型。</p>}{result && <section className="brainstorm-result"><div><strong>本次启发</strong><button type="button" onClick={() => navigator.clipboard.writeText(result)} title="复制结果"><Copy size={15}/></button></div><ReactMarkdown>{result}</ReactMarkdown></section>}</div>;
 }
 
 function PaymentResultScreen() {
@@ -1440,7 +1471,7 @@ function App() {
   });
   const [tab, setTab] = useState<Tab>("summary");
   const [selections, setSelections] = useState<Selection[]>([]);
-  const [sidePanelTab, setSidePanelTab] = useState<"ai" | "notes">("ai");
+  const [sidePanelTab, setSidePanelTab] = useState<"ai" | "notes" | "brainstorm">("ai");
   const [activeNoteId, setActiveNoteId] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState("");
   const [highlights, setHighlights] = useState<SavedHighlight[]>([]);
@@ -1456,6 +1487,7 @@ function App() {
   const librarySaveAttempted = useRef("");
   const restoredReaderFor = useRef<string | null>(null);
   const autoLayoutDocument = useRef("");
+  const autoSummaryDocument = useRef("");
   const fileInput = useRef<HTMLInputElement>(null);
   const [documentId, setDocumentId] = useState("");
   const [documentText, setDocumentText] = useState("");
@@ -1647,6 +1679,12 @@ function App() {
     librarySaveAttempted.current = documentId;
     void archiveCurrentDocument();
   }, [session, pdf, documentReady, documentId, currentPaperId]);
+  useEffect(() => {
+    if (!session || !paperStateLoaded || !documentReady || !documentId || !model || !documentText || summary.short || summary.full || autoSummaryDocument.current === documentId) return;
+    autoSummaryDocument.current = documentId;
+    void requestSummary("short");
+    void requestSummary("full");
+  }, [session, paperStateLoaded, documentReady, documentId, model, documentText, summary.short, summary.full]);
   useEffect(() => {
     if (!session || !currentPaperId || !documentReady || !paperStateLoaded || libraryHydrating.current) return;
     const timer = window.setTimeout(() => void persistLibraryState(), 900);
@@ -2262,14 +2300,8 @@ function App() {
           requestId: crypto.randomUUID(),
         }),
       });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error);
-      setSummary((current) => ({
-        ...current,
-        [kind]: result.text,
-        loading: undefined,
-      }));
-      if (typeof result.creditsRemaining === "number") setUsage((current) => current ? { ...current, creditsRemaining: result.creditsRemaining } : current);
+      await consumeAiStream(response, delta => setSummary(current => ({ ...current, [kind]: `${current[kind] || ""}${delta}` })));
+      setSummary(current => ({ ...current, loading: undefined }));
     } catch (error) {
       setSummary((current) => ({
         ...current,
@@ -2353,12 +2385,11 @@ function App() {
     try {
       if (!session) throw new Error("AUTH_REQUIRED");
       const history = [...messages, { role: "user" as const, content: currentQuestion }].slice(-12);
+      setMessages((current) => [...current, { role: "assistant", content: "" }]);
       const response = await functionRequest("ai-chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model, documentContext: documentText.slice(0, 100000), messages: history, requestId: crypto.randomUUID() }) });
-      const result = await response.json(); if (!response.ok) throw new Error(result.error);
-      setMessages((current) => [...current, { role: "assistant", content: result.answer }]);
-      if (typeof result.creditsRemaining === "number") setUsage((current) => current ? { ...current, creditsRemaining: result.creditsRemaining } : current);
+      await consumeAiStream(response, delta => setMessages(current => current.map((message, index) => index === current.length - 1 ? { ...message, content: message.content + delta } : message)));
     } catch (error) {
-      setMessages((current) => [...current, { role: "assistant", content: readableApiError(error, "AI 请求失败，请稍后重试。") }]);
+      setMessages((current) => current.map((message, index) => index === current.length - 1 && message.role === "assistant" && !message.content ? { ...message, content: readableApiError(error, "AI 请求失败，请稍后重试。") } : message));
     } finally { setChatLoading(false); }
   }
   function updateTask(id: string, task: Task) {
@@ -2759,13 +2790,14 @@ function App() {
             <div className="side-panel-tabs" role="tablist" aria-label="侧边栏功能">
               <button className={sidePanelTab === "ai" ? "active" : ""} role="tab" aria-selected={sidePanelTab === "ai"} onClick={() => setSidePanelTab("ai")}><Sparkles size={15} /> AI 助手</button>
               <button className={sidePanelTab === "notes" ? "active" : ""} role="tab" aria-selected={sidePanelTab === "notes"} onClick={() => setSidePanelTab("notes")}><StickyNote size={15} /> 笔记 <span className="note-count">{selections.filter(item => item.note?.trim()).length}</span></button>
+              <button className={sidePanelTab === "brainstorm" ? "active" : ""} role="tab" aria-selected={sidePanelTab === "brainstorm"} onClick={() => setSidePanelTab("brainstorm")}><Brain size={15} /> Brainstorm</button>
             </div>
             <span className="panel-status">{usage && <small className="quota-badge">{usage.plan} · {usage.creditsRemaining} 分</small>}</span>
             <IconButton label="收起面板" onClick={() => setPanelOpen(false)}>
               <ChevronRight size={17} />
             </IconButton>
           </div>
-          {sidePanelTab === "ai" ? <><div className="panel-content ai-reading-panel">
+          {sidePanelTab === "brainstorm" ? <BrainstormPanel session={session} model={model} documentTitle={documentTitle || fileName.replace(/\.pdf$/i, "")} documentText={documentText} currentPaperId={currentPaperId} onOpenLibrary={() => setLibraryOpen(true)} onUsage={creditsRemaining => setUsage(current => current ? { ...current, creditsRemaining } : current)} /> : sidePanelTab === "ai" ? <><div className="panel-content ai-reading-panel">
             {(
               [
                 ["short", "三行摘要", summary.short],
@@ -2776,7 +2808,7 @@ function App() {
                 <div className="ai-section-title">
                   <strong>{title}</strong>
                   <IconButton
-                    label={`折叠${title}`}
+                    label={`${summaryOpen[kind] ? "收纳" : "展开"}${title}`}
                     onClick={() =>
                       value &&
                       setSummaryOpen((current) => ({
@@ -2785,20 +2817,20 @@ function App() {
                       }))
                     }
                   >
-                    <ChevronDown size={16} />
+                    {summaryOpen[kind] ? <ChevronDown size={16} /> : <ChevronLeft size={16} />}
                   </IconButton>
                 </div>
-                {value ? (
+                {value || summary.loading === kind ? (
                   <>
                     <div
                       className={`summary-result reference-style${summaryOpen[kind] ? " open" : ""}`}
                     >
-                      <ReactMarkdown>{value}</ReactMarkdown>
+                      {value ? <ReactMarkdown>{value}</ReactMarkdown> : <span className="summary-streaming">正在生成摘要…</span>}
                     </div>
                     <div className="summary-tools">
                       <IconButton
                         label="复制摘要"
-                        onClick={() => navigator.clipboard.writeText(value)}
+                        onClick={() => navigator.clipboard.writeText(value || "")}
                       >
                         <Copy size={15} />
                       </IconButton>
@@ -2809,7 +2841,7 @@ function App() {
                         <RefreshCw size={15} />
                       </IconButton>
                     </div>
-                    {!summaryOpen[kind] && (
+                    {!summaryOpen[kind] && value && (
                       <button
                         className="show-more"
                         onClick={() =>
@@ -2819,7 +2851,7 @@ function App() {
                           }))
                         }
                       >
-                        Show more
+                        展开摘要
                       </button>
                     )}
                   </>
@@ -2840,12 +2872,9 @@ function App() {
               <div className="chat-messages">
                 {messages.map((message, index) => (
                   <div key={index} className={`chat-message ${message.role}`}>
-                    <ReactMarkdown>{message.content}</ReactMarkdown>
+                    {message.content ? <ReactMarkdown>{message.content}</ReactMarkdown> : "正在思考…"}
                   </div>
                 ))}
-              {chatLoading && (
-                <div className="chat-message assistant">正在思考…</div>
-              )}
               </div>
             </section>
           </div>

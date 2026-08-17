@@ -10,7 +10,7 @@ export type LibraryTag = { id: string; name: string; color: string };
 export type LibraryPaper = {
   id: string; folder_id: string | null; title: string; original_name: string; source_url: string | null;
   storage_path: string; file_size: number; page_count: number | null; archived_at: string | null;
-  last_opened_at: string; created_at: string; is_favorite?: boolean;
+  last_opened_at: string; created_at: string; is_favorite?: boolean; document_text?: string | null;
   library_paper_states?: { reader_state?: { currentPage?: number } } | null;
   library_paper_tags?: Array<{ library_tags?: LibraryTag | null }>;
 };
@@ -22,6 +22,16 @@ type Dialog = null | { kind: "rename" | "folder" | "delete" | "deleteMany" | "fo
 export async function listLibraryPapers() {
   const { data, error } = await supabase.from("library_papers")
     .select("id, folder_id, title, original_name, source_url, storage_path, file_size, page_count, archived_at, last_opened_at, created_at, is_favorite, library_paper_states(reader_state), library_paper_tags(library_tags(id,name,color))")
+    .order("last_opened_at", { ascending: false });
+  if (error) throw error;
+  return (data || []) as unknown as LibraryPaper[];
+}
+
+export async function listBrainstormPapers() {
+  const { data, error } = await supabase.from("library_papers")
+    .select("id,title,page_count,archived_at,document_text")
+    .eq("archived_at", null)
+    .not("document_text", "is", null)
     .order("last_opened_at", { ascending: false });
   if (error) throw error;
   return (data || []) as unknown as LibraryPaper[];
@@ -51,6 +61,7 @@ export function LibraryScreen({ onClose, onOpen, onImportFile, onImportUrl, canR
   const [selected, setSelected] = useState<string[]>([]), [loading, setLoading] = useState(true), [error, setError] = useState("");
   const [menu, setMenu] = useState<string | null>(null), [dialog, setDialog] = useState<Dialog>(null), [name, setName] = useState("");
   const [tagFilter, setTagFilter] = useState(""), [tagDraft, setTagDraft] = useState(""), [importOpen, setImportOpen] = useState(false), [url, setUrl] = useState(""), [importing, setImporting] = useState(false);
+  const [researchOverview, setResearchOverview] = useState(""), [researchDraft, setResearchDraft] = useState(""), [editingResearch, setEditingResearch] = useState(false), [savingResearch, setSavingResearch] = useState(false);
 
   const reload = async () => {
     setLoading(true); setError("");
@@ -63,6 +74,7 @@ export function LibraryScreen({ onClose, onOpen, onImportFile, onImportUrl, canR
   };
   useEffect(() => { void reload(); }, []);
   useEffect(() => { localStorage.setItem("shidea-library-layout", layout); }, [layout]);
+  useEffect(() => { void supabase.from("research_profiles").select("overview").maybeSingle().then(({ data }) => { const overview = data?.overview || ""; setResearchOverview(overview); setResearchDraft(overview); }); }, []);
 
   const visible = useMemo(() => papers.filter(paper => {
     if (view === "archived" ? !paper.archived_at : paper.archived_at) return false;
@@ -102,6 +114,7 @@ export function LibraryScreen({ onClose, onOpen, onImportFile, onImportUrl, canR
   };
   const submitUrl = async () => { if (!url.trim()) return; setImporting(true); try { await onImportUrl(url.trim()); setImportOpen(false); setUrl(""); } catch { setError("无法导入该链接，请确认 URL 或 DOI 后重试。"); } finally { setImporting(false); } };
   const toggleSelected = (id: string) => setSelected(value => value.includes(id) ? value.filter(item => item !== id) : [...value, id]);
+  const saveResearchOverview = async () => { const overview = researchDraft.trim().slice(0, 6000); setSavingResearch(true); try { const id = await userId(); const { error: saveError } = await supabase.from("research_profiles").upsert({ user_id: id, overview }, { onConflict: "user_id" }); if (saveError) throw saveError; setResearchOverview(overview); setEditingResearch(false); } catch { setError("研究主线保存失败，请稍后重试。"); } finally { setSavingResearch(false); } };
 
   const Paper = ({ paper }: { paper: LibraryPaper }) => <article className={`library-paper ${layout === "grid" ? "library-paper-grid" : ""}`} onClick={() => onOpen(paper)}>
     <button className={`library-select ${selected.includes(paper.id) ? "selected" : ""}`} aria-label="选择文献" onClick={event => { event.stopPropagation(); toggleSelected(paper.id); }}>{selected.includes(paper.id) && <Check size={13}/>}</button>
@@ -114,6 +127,7 @@ export function LibraryScreen({ onClose, onOpen, onImportFile, onImportUrl, canR
     <header className="library-header"><div className="library-brand"><img src="/brand/shidea-mark.png" alt=""/><div><strong>识谛</strong><small>文献工作台</small></div></div><div className="library-global-search"><Search size={17}/><input autoFocus value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索标题、文件名或来源"/></div><div className="library-header-actions"><button className="library-add" onClick={() => setImportOpen(true)}><FilePlus2 size={17}/>添加文献</button>{canReturn && <button className="library-return" onClick={onClose}><X size={17}/>返回阅读</button>}</div></header>
     <div className="library-layout"><aside className="library-sidebar"><nav><button className={view === "all" ? "active" : ""} onClick={() => setView("all")}><FileText size={17}/>全部文献 <span>{papers.filter(item => !item.archived_at).length}</span></button><button className={view === "favorite" ? "active" : ""} onClick={() => setView("favorite")}><Heart size={17}/>我的收藏 <span>{papers.filter(item => item.is_favorite && !item.archived_at).length}</span></button><button className={view === "recent" ? "active" : ""} onClick={() => setView("recent")}><FolderSearch size={17}/>阅读中 <span>{running}</span></button><button className={view === "archived" ? "active" : ""} onClick={() => setView("archived")}><Archive size={17}/>已归档 <span>{papers.filter(item => item.archived_at).length}</span></button></nav><div className="library-side-section"><div><p>文件夹</p><button aria-label="新建文件夹" onClick={() => { setName(""); setDialog({ kind: "folder" }); }}><FolderPlus size={16}/></button></div>{folders.map(folder => <button key={folder.id} className={view === folder.id ? "active" : ""} onClick={() => setView(folder.id)}><Folder size={16}/>{folder.name}<span>{papers.filter(paper => paper.folder_id === folder.id && !paper.archived_at).length}</span></button>)}</div><div className="library-side-section"><p>标签</p><div className="library-tag-filter">{tags.map(tag => <button key={tag.id} className={tagFilter === tag.id ? "active" : ""} onClick={() => setTagFilter(tagFilter === tag.id ? "" : tag.id)}><i style={{ background: tag.color }}/>{tag.name}</button>)}</div><form onSubmit={event => { event.preventDefault(); void createTag(); }}><input value={tagDraft} onChange={event => setTagDraft(event.target.value)} placeholder="新建标签"/><button aria-label="新建标签">+</button></form></div></aside>
       <section className="library-content"><div className="library-page-heading"><div><p>YOUR READING SPACE</p><h1>{activeFolder?.name || (view === "archived" ? "已归档文献" : view === "favorite" ? "我的文献" : view === "recent" ? "继续阅读" : "最近阅读")}</h1><span>{visible.length} 篇文献</span></div><div className="library-tools">{activeFolder && <button className="library-folder-settings" aria-label="管理当前文件夹" onClick={() => { setName(activeFolder.name); setDialog({ kind: "folder", folder: activeFolder }); }}><Pencil size={16}/>管理文件夹</button>}<select aria-label="排序方式" value={sort} onChange={event => setSort(event.target.value as Sort)}><option value="recent">最近阅读</option><option value="added">最近添加</option><option value="title">标题 A–Z</option><option value="size">文件大小</option></select><div><button className={layout === "list" ? "active" : ""} aria-label="列表视图" onClick={() => setLayout("list")}><List size={17}/></button><button className={layout === "grid" ? "active" : ""} aria-label="网格视图" onClick={() => setLayout("grid")}><LayoutGrid size={17}/></button></div></div></div>
+        <section className={`research-overview${editingResearch ? " editing" : ""}`}><div className="research-overview-heading"><div><p>RESEARCH THREAD</p><h2>我的工作概述</h2></div><button type="button" onClick={() => { if (editingResearch) { setResearchDraft(researchOverview); setEditingResearch(false); } else setEditingResearch(true); }}>{editingResearch ? "取消" : researchOverview ? "编辑" : "建立研究主线"}</button></div>{editingResearch ? <><textarea autoFocus maxLength={6000} value={researchDraft} onChange={event => setResearchDraft(event.target.value)} placeholder="写下你正在解决的问题、目标对象、方法偏好、约束条件与近期目标。Brainstorm 会将它作为每次分析的研究主线。"/><div className="research-overview-actions"><span>{researchDraft.length}/6000</span><button type="button" onClick={() => void saveResearchOverview()} disabled={savingResearch}>{savingResearch ? "保存中…" : "保存研究主线"}</button></div></> : <p className={researchOverview ? "" : "empty"}>{researchOverview || "尚未建立研究主线。用几句话定义你正在推进的工作，Brainstorm 将据此把文献转化为可执行的启发。"}</p>}</section>
         {view !== "archived" && <div className="library-stats"><div><span>文献总数</span><strong>{papers.filter(item => !item.archived_at).length}</strong></div><div><span>阅读进行中</span><strong>{running}</strong></div><div><span>我的收藏</span><strong>{papers.filter(item => item.is_favorite && !item.archived_at).length}</strong></div><div><span>已用存储</span><strong>{formatBytes(totalSize)}</strong></div></div>}
         {error && <div className="library-error"><span>{error}</span><button onClick={() => void reload()}>重试</button></div>}
         {selected.length > 0 && <div className="library-bulk" onClick={event => event.stopPropagation()}><strong>已选择 {selected.length} 篇</strong><button onClick={() => void update(selected, { is_favorite: true })}><Star size={15}/>收藏</button><label><Folder size={15}/>移动到<select defaultValue="" onChange={event => event.target.value && void update(selected, { folder_id: event.target.value })}><option value="" disabled>选择文件夹</option>{folders.map(folder => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select></label><button onClick={() => void update(selected, { archived_at: new Date().toISOString() })}><Archive size={15}/>归档</button><button className="bulk-danger" onClick={() => setDialog({ kind: "deleteMany", papers: papers.filter(paper => selected.includes(paper.id)) })}><Trash2 size={15}/>删除</button><button onClick={() => setSelected([])}>取消选择</button></div>}
