@@ -1550,7 +1550,7 @@ body.is-resizing-panel * {
 .section-hint { margin: 0 0 8px; color: var(--text-muted); font-size: 12px; line-height: 1.55; }
 .ai-section .summary-result.reference-style { position: relative; max-height: 118px; overflow: hidden; padding: 7px 0 2px; font-size: 13px; line-height: 1.65; }
 .ai-section .summary-result.reference-style.open { max-height: none; }
-.ai-section .summary-result.reference-style:not(.open)::after { content: ""; position: absolute; right: -2px; bottom: 0; left: -2px; height: 28px; pointer-events: none; border-radius: 9px 9px 0 0; background: color-mix(in srgb, var(--surface) 46%, transparent); box-shadow: 0 -10px 18px color-mix(in srgb, var(--surface) 32%, transparent); backdrop-filter: blur(10px) saturate(120%); -webkit-backdrop-filter: blur(10px) saturate(120%); }
+.ai-section .summary-result.reference-style:not(.open)::after { display: none; }
 .summary-streaming { color: var(--text-muted); font-size: 12px; }
 .ai-section .summary-result.reference-style :is(p, ul, ol) { margin: 0 0 8px; }
 .ai-section .summary-result.reference-style :is(h1, h2, h3) { margin: 0 0 6px; font-size: 14px; }
