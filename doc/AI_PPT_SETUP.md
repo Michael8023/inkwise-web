@@ -1,6 +1,6 @@
 # AI PPT 制作配置
 
-工作台的“AI PPT 制作”使用 Apilio 已聚合的文多多（DocMee 官方格式）生成 PPT。浏览器不会保存或发送密钥；请求始终经过 Supabase Edge Function `ai-ppt`。
+工作台的“AI PPT 制作”使用文多多官方 **UI iframe V2（Agent 精美设计）**。浏览器不会保存或发送密钥；Edge Function 仅为当前登录用户签发短期 Docmee token，随后由官方创作器完成大纲、模板选择、编辑与下载。
 
 ## 部署 Function
 
@@ -10,21 +10,12 @@ supabase functions deploy ai-ppt
 
 ## 配置密钥
 
-无需提供新的文多多 API Key。该功能复用项目已有的 `APILIO_BASE_URL` 和 `APILIO_API_KEY`，与聊天、摘要功能一致。
-
-如供应商的直接生成或 Markdown 生成路径与默认值不同，可额外设置：
+在文多多开放平台创建 API Key 后设置为 Supabase secret：
 
 ```bash
-supabase secrets set DOCMEE_DIRECT_GENERATE_PATH=/docmee/v1/api/ppt/directGeneratePptx
-supabase secrets set DOCMEE_GENERATE_PPTX_PATH=/docmee/v1/api/ppt/generatePptx
+supabase secrets set DOCMEE_API_KEY=你的文多多开放平台_API_KEY
 ```
 
-默认路径会由 `APILIO_BASE_URL` 拼接为：
+不要将该值设置为 `VITE_*` 变量，也不要写入前端代码。函数会以 `pdf-ai-reader:<Supabase user id>` 作为 Docmee `uid`，从而隔离每位用户的作品与自定义模板。
 
-- `/docmee/v1/api/ppt/directGeneratePptx`：直接后台生成；
-- `/docmee/v1/api/ppt/generateOutline`：流式生成大纲；
-- `/docmee/v1/api/ppt/generateContent`：流式补全内容、异步生成 PPT；
-- `/docmee/v1/api/ppt/asyncPptInfo`：查询异步任务；
-- `/docmee/v1/api/ppt/generatePptx`：将 Markdown 转为 PPT。
-
-若 Apilio 的文多多兼容路由要求不同的字段名称或路径，请只在 `supabase/functions/ai-ppt/index.ts` 中调整对应 action 的请求映射，勿把 API Key 放到 `VITE_*` 环境变量或前端代码中。
+前端在进入创作器前会要求用户核验提取文本；它会把资料和“不得改写实验数据”的约束传给 V2 创作器。Docmee 对最终生成的 PPT 按其平台积分规则收费。
