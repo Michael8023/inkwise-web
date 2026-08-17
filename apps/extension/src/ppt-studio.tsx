@@ -8,7 +8,8 @@ type Mode = "direct" | "stream" | "markdown";
 type Result = { fileUrl?: string; pptId?: string; progress?: number; status?: string; total?: number; current?: number; pptxProperty?: string; data?: unknown };
 type State = "idle" | "reading" | "generating" | "editing" | "polling" | "done" | "error";
 type ActiveJob = { pptId: string; paperId: string; markdown: string; result: Result; slides: Slide[]; mode: Mode };
-type Slide = { title: string; lines: string[] };
+type SlideElement = { text: string; x?: number; y?: number; width?: number; height?: number; fontSize?: number; color?: string; background?: string; bold?: boolean; align?: "left" | "center" | "right" };
+type Slide = { title: string; lines: string[]; elements: SlideElement[]; background?: string };
 const jobStorageKey = "shidea-ai-ppt-active-job";
 
 function readStreamValue(value: unknown): string {
@@ -42,20 +43,40 @@ function stringsFrom(value: unknown, found: string[] = []): string[] {
   else if (value && typeof value === "object") Object.entries(value as Record<string, unknown>).forEach(([key, item]) => { if (/^(text|content|value|title|name|runs|paragraphs|children)$/i.test(key)) stringsFrom(item, found); });
   return [...new Set(found)].slice(0, 14);
 }
+function numeric(value: unknown, axis: "x" | "y") {
+  if (typeof value === "string" && value.endsWith("%")) return Number(value.slice(0, -1));
+  const parsed = Number(value); if (!Number.isFinite(parsed)) return undefined;
+  if (Math.abs(parsed) <= 1) return parsed * 100;
+  if (Math.abs(parsed) <= 100) return parsed;
+  return parsed / (axis === "x" ? 12.8 : 7.2);
+}
+function textFromNode(node: Record<string, any>) { for (const key of ["text", "content", "value", "title"]) { if (typeof node[key] === "string" && node[key].trim()) return node[key].trim(); } return ""; }
+function elementsFrom(value: unknown, elements: SlideElement[] = [], depth = 0): SlideElement[] {
+  if (!value || typeof value !== "object" || depth > 7) return elements;
+  if (Array.isArray(value)) { value.forEach(item => elementsFrom(item, elements, depth + 1)); return elements; }
+  const node = value as Record<string, any>, text = textFromNode(node), style = node.style || node.textStyle || node.options || {};
+  if (text && text.length < 1000) {
+    const item: SlideElement = { text, x: numeric(node.x ?? node.left ?? node.xPos, "x"), y: numeric(node.y ?? node.top ?? node.yPos, "y"), width: numeric(node.width ?? node.w, "x"), height: numeric(node.height ?? node.h, "y"), fontSize: Number(style.fontSize ?? style.font_size ?? node.fontSize) || undefined, color: style.color ?? style.fontColor ?? node.color, background: style.background ?? style.fill ?? node.fill, bold: Boolean(style.bold ?? node.bold), align: style.align ?? style.textAlign };
+    if (!elements.some(existing => existing.text === item.text && existing.x === item.x && existing.y === item.y)) elements.push(item);
+  }
+  Object.values(node).forEach(child => { if (child && typeof child === "object") elementsFrom(child, elements, depth + 1); });
+  return elements.slice(0, 40);
+}
 function slidesFrom(value: unknown): Slide[] {
   const root = value as Record<string, any>; const candidates = [root?.slides, root?.pages, root?.ppt?.slides, root?.data?.slides].find(Array.isArray) as unknown[] | undefined;
   if (!candidates) return [];
-  return candidates.map((slide, index) => { const lines = stringsFrom(slide); return { title: lines[0] || `第 ${index + 1} 页`, lines: lines.slice(lines[0] ? 1 : 0) }; });
+  return candidates.map((slide, index) => { const lines = stringsFrom(slide); const elements = elementsFrom(slide); const slideData = slide as Record<string, any>; return { title: lines[0] || `第 ${index + 1} 页`, lines: lines.slice(lines[0] ? 1 : 0), elements, background: slideData.background ?? slideData.backgroundColor ?? slideData.fill }; });
 }
 function persist(job: ActiveJob | null) { try { if (job) localStorage.setItem(jobStorageKey, JSON.stringify(job)); else localStorage.removeItem(jobStorageKey); } catch { /* Storage is optional. */ } }
 
 export function PptStudio({ papers, extractText }: { papers: LibraryPaper[]; extractText: (paper: LibraryPaper) => Promise<string> }) {
   const usablePapers = useMemo(() => papers.filter(paper => !paper.archived_at), [papers]);
   const [paperId, setPaperId] = useState(""), [prompt, setPrompt] = useState(""), [mode, setMode] = useState<Mode>("stream"), [markdown, setMarkdown] = useState("");
-  const [result, setResult] = useState<Result>({}), [slides, setSlides] = useState<Slide[]>([]), [state, setState] = useState<State>("idle"), [error, setError] = useState("");
+  const [result, setResult] = useState<Result>({}), [slides, setSlides] = useState<Slide[]>([]), [state, setState] = useState<State>("idle"), [error, setError] = useState(""), [completeNotice, setCompleteNotice] = useState("");
   const paper = usablePapers.find(item => item.id === paperId);
   useEffect(() => { if (!paperId && usablePapers[0]) setPaperId(usablePapers[0].id); }, [paperId, usablePapers]);
   useEffect(() => { try { const saved = JSON.parse(localStorage.getItem(jobStorageKey) || "null") as ActiveJob | null; if (saved?.pptId) { setPaperId(saved.paperId); setMarkdown(saved.markdown); setResult(saved.result); setSlides(saved.slides || []); setMode(saved.mode); setState(saved.result.fileUrl ? "done" : "polling"); } } catch { persist(null); } }, []);
+  useEffect(() => { if (result.fileUrl) setCompleteNotice("PPT 已生成完成，可以下载了。 "); }, [result.fileUrl]);
   const updateSlides = async (next: Result) => { if (!next.pptxProperty) return; try { setSlides(slidesFrom(await decodePptxProperty(next.pptxProperty))); } catch { /* Keep the previous preview while an incomplete property is returned. */ } };
   const saveJob = (next: Result, nextSlides = slides) => { if (next.pptId && !next.fileUrl) persist({ pptId: next.pptId, paperId, markdown, result: next, slides: nextSlides, mode }); else if (next.fileUrl) persist(null); };
   useEffect(() => { if (!result.pptId || result.fileUrl || state !== "polling") return; const check = () => { void pptRequest("status", { pptId: result.pptId }).then(async incoming => { let next = mergeResult(result, incoming); if (!next.fileUrl && next.total && next.current && next.current >= next.total) next = mergeResult(next, await pptRequest("download", { id: next.pptId })); setResult(next); await updateSlides(next); saveJob(next); if (next.fileUrl) setState("done"); }).catch(() => undefined); }; check(); const timer = window.setInterval(check, 2200); return () => window.clearInterval(timer); }, [result, state]);
@@ -76,8 +97,9 @@ export function PptStudio({ papers, extractText }: { papers: LibraryPaper[]; ext
   const run = mode === "direct" ? directGenerate : mode === "stream" ? () => generateMarkdown(true) : generatePptFromMarkdown;
   return <section className="ppt-studio ppt-studio-v2">
     <header><div><span><Presentation size={15}/> AI PRESENTATION</span><h1>AI PPT 制作</h1><p>任务会在云端持续生成；关闭或刷新页面后，重新进入此页会自动恢复 PPT 进度和预览。</p></div>{result.fileUrl && <a className="ppt-download" href={result.fileUrl} target="_blank" rel="noreferrer"><Download size={16}/>下载 PPT</a>}</header>
+    {completeNotice && <div className="ppt-complete-notice"><span>{completeNotice}</span><button onClick={() => setCompleteNotice("")}>知道了</button></div>}
     <form className="ppt-form ppt-config" onSubmit={event => { event.preventDefault(); void run(); }}><label>选择 PDF<select value={paperId} onChange={event => setPaperId(event.target.value)}>{usablePapers.length ? usablePapers.map(item => <option key={item.id} value={item.id}>{item.title}</option>) : <option value="">文献库暂无 PDF</option>}</select></label><label className="ppt-prompt">制作要求<textarea value={prompt} onChange={event => setPrompt(event.target.value)} maxLength={2000} placeholder="例如：面向组会汇报，突出研究问题、方法、实验结果和局限性，控制在 10 页以内。"/></label><fieldset><legend>生成方式</legend><label className={mode === "direct" ? "selected" : ""}><input type="radio" checked={mode === "direct"} onChange={() => setMode("direct")}/><b>后台生成</b><small>后台持续生成，实时显示进度。</small></label><label className={mode === "stream" ? "selected" : ""}><input type="radio" checked={mode === "stream"} onChange={() => setMode("stream")}/><b>流式生成 PPT</b><small>流式 Markdown + 逐页 PPT 预览。</small></label><label className={mode === "markdown" ? "selected" : ""}><input type="radio" checked={mode === "markdown"} onChange={() => setMode("markdown")}/><b>Markdown 转 PPT</b><small>先生成、编辑 Markdown，再单独生成 PPT。</small></label></fieldset><button className="ppt-generate" disabled={busy || !paper}><Sparkles size={17}/>{state === "reading" ? "正在读取 PDF…" : state === "generating" ? "正在生成…" : state === "polling" ? `正在生成 PPT${result.current && result.total ? ` · ${result.current}/${result.total} 页` : ""}…` : mode === "markdown" && !markdown ? "先生成 Markdown" : mode === "markdown" ? "将 Markdown 生成 PPT" : "开始生成"}</button>{result.pptId && !result.fileUrl && <button type="button" className="ppt-stop-tracking" onClick={() => { persist(null); setState("idle"); setResult({}); }}><StopCircle size={15}/>停止本地追踪</button>}{error && <p className="ppt-error">{error}</p>}</form>
-    <section className="ppt-markdown-panel"><div className="ppt-panel-heading"><span><MonitorPlay size={16}/> Markdown 内容</span>{busy && <LoaderCircle className="ppt-spin" size={16}/>}<small>{mode === "markdown" ? "可编辑" : "实时生成"}</small></div>{mode === "markdown" ? <textarea value={markdown} onChange={event => setMarkdown(event.target.value)} disabled={markdownLocked} placeholder="生成的大纲与页面内容会显示在这里；可编辑后再点击“将 Markdown 生成 PPT”。"/> : markdown ? <ReactMarkdown>{markdown}</ReactMarkdown> : <div className="ppt-preview-empty"><FileText size={28}/><p>Markdown 大纲和页面内容将在这里流式显示。</p></div>}</section>
-    <section className="ppt-slide-panel"><div className="ppt-panel-heading"><span><Presentation size={16}/> 实时 PPT 预览</span><small>{result.total ? `${result.current || 0} / ${result.total} 页已生成` : result.pptId ? "正在等待页面数据…" : "等待生成"}</small></div>{slides.length ? <div className="ppt-slide-strip">{slides.map((slide, index) => <article className="ppt-slide" key={`${index}-${slide.title}`}><em>{index + 1}</em><h3>{slide.title}</h3><ul>{slide.lines.slice(0, 6).map((line, lineIndex) => <li key={lineIndex}>{line}</li>)}</ul></article>)}</div> : <div className="ppt-preview-empty"><Presentation size={30}/><p>生成过程中会解码文多多返回的 PPT 数据，并逐页展示已完成页面。</p></div>}</section>
+    <section className="ppt-markdown-panel"><div className="ppt-panel-heading"><span><MonitorPlay size={16}/> Markdown 内容</span>{busy && <LoaderCircle className="ppt-spin" size={16}/>}<small>{mode === "markdown" ? "可编辑" : "实时生成"}</small></div>{mode === "markdown" ? <textarea value={markdown} onChange={event => setMarkdown(event.target.value)} disabled={markdownLocked} placeholder="生成的大纲与页面内容会显示在这里；可编辑后再点击“将 Markdown 生成 PPT”。"/> : <div className="ppt-markdown-scroll">{markdown ? <ReactMarkdown>{markdown}</ReactMarkdown> : <div className="ppt-preview-empty"><FileText size={28}/><p>Markdown 大纲和页面内容将在这里流式显示。</p></div>}</div>}</section>
+    <section className="ppt-slide-panel"><div className="ppt-panel-heading"><span><Presentation size={16}/> 实时 PPT 预览</span><small>{result.total ? `${result.current || 0} / ${result.total} 页已生成` : result.pptId ? "正在等待页面数据…" : "等待生成"}</small></div>{slides.length ? <div className="ppt-slide-strip">{slides.map((slide, index) => <article className="ppt-slide" style={{ background: slide.background }} key={`${index}-${slide.title}`}><em>{index + 1}</em><div className="ppt-slide-canvas">{slide.elements.length ? slide.elements.map((element, elementIndex) => <p key={elementIndex} style={{ left: element.x !== undefined ? `${element.x}%` : undefined, top: element.y !== undefined ? `${element.y}%` : undefined, width: element.width ? `${element.width}%` : undefined, minHeight: element.height ? `${element.height}%` : undefined, fontSize: element.fontSize ? `${Math.max(9, Math.min(element.fontSize, 36))}px` : undefined, color: element.color, background: element.background, fontWeight: element.bold ? 700 : undefined, textAlign: element.align }}>{element.text}</p>) : <><h3>{slide.title}</h3><ul>{slide.lines.slice(0, 6).map((line, lineIndex) => <li key={lineIndex}>{line}</li>)}</ul></>}</div></article>)}</div> : <div className="ppt-preview-empty"><Presentation size={30}/><p>生成过程中会解码文多多返回的 PPT 数据，并逐页展示已完成页面。</p></div>}</section>
   </section>;
 }
