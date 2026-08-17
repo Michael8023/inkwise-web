@@ -76,6 +76,9 @@ Deno.serve(async (req) => {
       pptId: clean(data.pptId || data.ppt_id || data.id, 300) || undefined,
       progress: Number(data.progress || data.percent || 0) || undefined,
       status: clean(data.status || data.state, 100) || undefined,
+      total: Number(data.total || 0) || undefined,
+      current: Number(data.current || 0) || undefined,
+      pptxProperty: clean(data.pptxProperty, 4_000_000) || undefined,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "AI_PPT_FAILED";
