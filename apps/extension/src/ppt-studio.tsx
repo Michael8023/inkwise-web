@@ -29,9 +29,10 @@ async function stream(action: "outline" | "content", requestBody: Record<string,
     const value = raw.trim().replace(/^data:\s*/, ""); if (!value || value === "[DONE]") return;
     try {
       const item = JSON.parse(value) as Record<string, any>;
-      const text = typeof item.delta === "string" ? item.delta : typeof item.content === "string" ? item.content : typeof item.text === "string" ? item.text : typeof item.data?.content === "string" ? item.data.content : "";
+      const data = item.data?.data && typeof item.data.data === "object" ? item.data.data : item.data;
+      const text = typeof item.delta === "string" ? item.delta : typeof item.content === "string" ? item.content : typeof item.text === "string" ? item.text : typeof data?.content === "string" ? data.content : typeof data?.text === "string" ? data.text : "";
       if (text) { full += text; onText(full); }
-      const pptId = item.pptId || item.ppt_id || item.data?.pptId || item.data?.ppt_id;
+      const pptId = item.pptId || item.ppt_id || item.id || data?.pptId || data?.ppt_id || data?.id;
       if (pptId) onPptId(String(pptId));
     } catch { /* Ignore provider keep-alive events. */ }
   };
