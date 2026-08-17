@@ -397,8 +397,9 @@ function collectMineruDocumentTitle(values: unknown[], pageCount: number): strin
 }
 const apiErrors: Record<string, string> = {
   AUTH_REQUIRED: "请先登录后使用 AI 功能。",
-  QUOTA_EXCEEDED: "AI 额度不足，请联系管理员充值。",
+  QUOTA_EXCEEDED: "积分不足，请购买积分或开通 Pro。",
   MODEL_DISABLED: "当前模型不可用，请选择其他模型。",
+  MODEL_PLAN_RESTRICTED: "该模型仅 Pro 会员可用，请选择 Free 模型或开通 Pro。",
   CONTEXT_TOO_LARGE: "文档内容过长，暂时无法提交给 AI。",
   RATE_LIMITED: "请求过于频繁，请稍后再试。",
   SUPABASE_NOT_CONFIGURED: "尚未配置 Supabase 项目。",
@@ -504,9 +505,9 @@ function AccountDialog({ session, usage, inviteCode, onClose, onSignOut, onOpenL
     <button type="button" className="popover-close" onClick={onClose}><X size={16} /></button>
     <div className="auth-brand"><img src="/brand/shidea-mark.png" alt="" /><span>识谛 <em>shidea</em></span></div>
     <div className="account-hero"><div className="account-avatar">{initial}</div><div><p>账户中心</p><h2>{displayName}</h2><span>{session.user.email}</span></div></div>
-    <section className="account-credits"><div><span>可用 AI 额度</span><strong>{creditAmount}<small> 分</small></strong></div><div className="credit-orbit"><Sparkles size={19} /></div></section>
-    <button type="button" className="account-purchase" onClick={onOpenPurchase}><Plus size={16}/>购买 AI 额度</button>
-    <div className="quota-summary"><span>当前套餐<strong>{usage?.plan ? usage.plan.toUpperCase() : "FREE"}</strong></span><span>结算日期<strong>{usage?.periodEnd ? new Date(usage.periodEnd).toLocaleDateString("zh-CN", { month: "short", day: "numeric" }) : "每月"}</strong></span></div>
+    <section className="account-credits"><div><span>{usage?.plan === "pro" ? "Pro 会员权益" : "可用 AI 积分"}</span><strong>{usage?.plan === "pro" ? "无限" : creditAmount}<small>{usage?.plan === "pro" ? " 使用" : " 分"}</small></strong></div><div className="credit-orbit"><Sparkles size={19} /></div></section>
+    <button type="button" className="account-purchase" onClick={onOpenPurchase}><Plus size={16}/>{usage?.plan === "pro" ? "续费 Pro 会员" : "购买积分 / 开通 Pro"}</button>
+    <div className="quota-summary"><span>当前套餐<strong>{usage?.plan ? usage.plan.toUpperCase() : "FREE"}</strong></span><span>{usage?.plan === "pro" ? "有效至" : "AI 调用"}<strong>{usage?.plan === "pro" && usage.periodEnd ? new Date(usage.periodEnd).toLocaleDateString("zh-CN", { month: "short", day: "numeric" }) : usage?.plan === "pro" ? "—" : "2 分 / 次"}</strong></span></div>
     <section className="account-invite"><span>我的邀请码</span><strong>{inviteCode || "正在生成…"}</strong><small>好友注册时填写，即可获得后台设置的新人奖励。</small><div className="account-invite-actions"><button type="button" disabled={!inviteCode} onClick={() => void copyInvite("code")}><Copy size={13}/>{inviteCopied === "code" ? "已复制" : "复制邀请码"}</button><button type="button" disabled={!inviteLink} onClick={() => void copyInvite("link")}><Link2 size={13}/>{inviteCopied === "link" ? "已复制" : "复制邀请链接"}</button></div></section>
     <button type="button" className="account-library" onClick={onOpenLibrary}><span className="account-library-icon"><FolderOpen size={22}/></span><span className="account-library-copy"><small>个人文献工作台</small><strong>整理每一篇重要文献</strong><em>查看文献库、继续阅读与管理资料</em></span><ChevronRight size={19} /></button>
     <button type="button" className="account-feedback" onClick={onOpenFeedback}><MessageSquare size={16}/><span><small>共创识谛</small><strong>提交反馈与建议</strong></span><ChevronRight size={17}/></button>
@@ -515,7 +516,7 @@ function AccountDialog({ session, usage, inviteCode, onClose, onSignOut, onOpenL
 }
 
 function PurchaseDialog({ busy, error, onClose, onPurchase }: { busy: string; error: string; onClose: () => void; onPurchase: (code: string) => void }) {
-  return <div className="auth-backdrop"><section className="auth-dialog purchase-dialog"><button type="button" className="popover-close" onClick={onClose} disabled={Boolean(busy)}><X size={16}/></button><div className="auth-brand"><img src="/brand/shidea-mark.png" alt="" /><span>识谛 <em>shidea</em></span></div><div className="auth-heading"><h2>购买 AI 额度</h2><p>支付宝沙箱测试订单，不会产生真实扣款。</p></div><div className="purchase-options"><button disabled={Boolean(busy)} onClick={() => onPurchase("sandbox-mini")}><span>沙箱测试</span><strong>100 分</strong><em>¥0.01</em></button><button disabled={Boolean(busy)} onClick={() => onPurchase("sandbox-plus")}><span>沙箱测试</span><strong>1,000 分</strong><em>¥0.10</em></button></div>{error && <p className="auth-feedback error">{error}</p>}{busy && <p className="auth-notice purchase-loading"><RefreshCw className="auth-spinner" size={15}/>{busy}</p>}<small className="purchase-note">支付成功后，额度由支付宝异步通知确认并自动到账。</small></section></div>;
+  return <div className="auth-backdrop"><section className="auth-dialog purchase-dialog"><button type="button" className="popover-close" onClick={onClose} disabled={Boolean(busy)}><X size={16}/></button><div className="auth-brand"><img src="/brand/shidea-mark.png" alt="" /><span>识谛 <em>shidea</em></span></div><div className="auth-heading"><h2>积分与 Pro 会员</h2><p>Free 用户每次 AI 调用固定消耗 2 积分；Pro 不扣积分。</p></div><div className="purchase-options"><button disabled={Boolean(busy)} onClick={() => onPurchase("points-50")}><span>积分包</span><strong>50 积分</strong><em>¥1</em></button><button disabled={Boolean(busy)} onClick={() => onPurchase("points-250")}><span>积分包</span><strong>250 积分</strong><em>¥5</em></button><button disabled={Boolean(busy)} onClick={() => onPurchase("points-500")}><span>积分包</span><strong>500 积分</strong><em>¥10</em></button><button className="purchase-pro" disabled={Boolean(busy)} onClick={() => onPurchase("pro-month")}><span>Pro 月卡 · 30 天</span><strong>无限 AI 使用</strong><em>¥30</em><small>单次购买，到期自动恢复 Free</small></button></div>{error && <p className="auth-feedback error">{error}</p>}{busy && <p className="auth-notice purchase-loading"><RefreshCw className="auth-spinner" size={15}/>{busy}</p>}<small className="purchase-note">支付成功后，积分或会员权益由支付宝异步通知确认并自动生效。</small></section></div>;
 }
 
 function FeedbackScreen({ session, onBack }: { session: AuthSession; onBack: () => void }) {
@@ -1511,7 +1512,7 @@ function App() {
   const [documentText, setDocumentText] = useState("");
   const [documentReady, setDocumentReady] = useState(false);
   const [pdfOpening, setPdfOpening] = useState(false);
-  const [models, setModels] = useState<Array<{ id: string; name: string }>>([]);
+  const [models, setModels] = useState<Array<{ id: string; name: string; available?: boolean; tier?: "free" | "pro" }>>([]);
   const [model, setModel] = useState("");
   const [summary, setSummary] = useState<{
     short?: string;
@@ -1707,11 +1708,11 @@ function App() {
     void archiveCurrentDocument();
   }, [session, pdf, documentReady, documentId, currentPaperId]);
   useEffect(() => {
-    if (!session || !paperStateLoaded || !documentReady || !documentId || !model || !documentText || summary.short || summary.full || autoSummaryDocument.current === documentId) return;
+    if (!session || usage?.plan !== "pro" || !paperStateLoaded || !documentReady || !documentId || !model || !documentText || summary.short || summary.full || autoSummaryDocument.current === documentId) return;
     autoSummaryDocument.current = documentId;
     void requestSummary("short");
     void requestSummary("full");
-  }, [session, paperStateLoaded, documentReady, documentId, model, documentText, summary.short, summary.full]);
+  }, [session, usage?.plan, paperStateLoaded, documentReady, documentId, model, documentText, summary.short, summary.full]);
   useEffect(() => {
     if (!session || !currentPaperId || !documentReady || !paperStateLoaded || libraryHydrating.current) return;
     const timer = window.setTimeout(() => void persistLibraryState(), 900);
@@ -2938,8 +2939,8 @@ function App() {
                   disabled={!models.length}
                 >
                   {models.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.name}
+                    <option key={item.id} value={item.id} disabled={item.available === false}>
+                      {item.name}{item.available === false ? " · Pro" : item.tier === "free" ? " · Free" : ""}
                     </option>
                   ))}
                 </select>

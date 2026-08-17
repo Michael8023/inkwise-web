@@ -10,7 +10,7 @@ type AdminUser = {
   period_end: string | null; status: string; created_at: string; library_paper_count: number; library_storage_bytes: number; invite_code: string | null; invited_by_email: string | null; successful_referral_count: number; referral_bonus_credits: number;
 };
 type Plan = { id: string; name: string; monthly_credits: number; is_default: boolean };
-type CatalogModel = { id: string; name: string; provider: string; enabled: boolean };
+type CatalogModel = { id: string; name: string; provider: string; enabled: boolean; free_enabled?: boolean; pro_enabled?: boolean };
 type Detail = {
   usage: Array<{ id: string; feature: string; model: string; credits: number; status: string; created_at: string }>;
   adjustments: Array<{ id: string; operation: string; amount: number; credits_before: number; credits_after: number; note: string | null; created_at: string }>;
@@ -91,6 +91,7 @@ function AdminApp() {
   const [savingPlan, setSavingPlan] = useState(false);
   const [catalogModels, setCatalogModels] = useState<CatalogModel[]>([]);
   const [selectedModelIds, setSelectedModelIds] = useState<Set<string>>(new Set());
+  const [freeModelIds, setFreeModelIds] = useState<Set<string>>(new Set());
   const [modelsLoading, setModelsLoading] = useState(false);
   const [modelsSaving, setModelsSaving] = useState(false);
   const [modelSearch, setModelSearch] = useState("");
@@ -130,7 +131,8 @@ function AdminApp() {
       const result = await request("?models=catalog");
       const items = Array.isArray(result.models) ? result.models as CatalogModel[] : [];
       setCatalogModels(items);
-      setSelectedModelIds(new Set(items.filter(item => item.enabled).map(item => item.id)));
+      setSelectedModelIds(new Set(items.filter(item => item.pro_enabled ?? item.enabled).map(item => item.id)));
+      setFreeModelIds(new Set(items.filter(item => item.free_enabled ?? item.enabled).map(item => item.id)));
     } catch (cause) { const code=cause instanceof Error?cause.message:""; setError(errors[code] || code || "模型列表加载失败。"); }
     finally { setModelsLoading(false); }
   }
@@ -147,12 +149,13 @@ function AdminApp() {
       return next;
     });
   }
+  function toggleFreeModel(id: string) { setFreeModelIds(current => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next; }); }
   async function saveModels() {
     const selected = catalogModels.filter(item => selectedModelIds.has(item.id));
-    if (!selected.length) { setError(errors.INVALID_MODELS); return; }
+    if (!selected.length || !freeModelIds.size) { setError(errors.INVALID_MODELS); return; }
     setModelsSaving(true); setError("");
     try {
-      await request("", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "saveModels", models: selected.map(({ id, name, provider }) => ({ id, name, provider })) }) });
+      await request("", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "saveModels", models: catalogModels.map(({ id, name, provider }) => ({ id, name, provider, freeEnabled: freeModelIds.has(id), proEnabled: selectedModelIds.has(id) })) }) });
       await loadModels();
     } catch (cause) { const code=cause instanceof Error?cause.message:""; setError(errors[code] || code || "模型配置保存失败。"); }
     finally { setModelsSaving(false); }
@@ -234,7 +237,7 @@ function AdminApp() {
       {error && <div className="admin-alert"><ShieldCheck size={17}/>{error}</div>}
       <section className="plan-management"><div className="plan-management-head"><div><span>新用户默认套餐</span><h2>套餐与初始额度</h2></div><button className="admin-add-plan" onClick={() => beginPlanEdit()}><Plus size={16}/>新增套餐</button></div><div className="plan-grid">{plans.map(plan => <article key={plan.id} className={plan.is_default ? "default-plan" : ""}><div><strong>{plan.name.toUpperCase()}</strong>{plan.is_default && <b>新用户默认</b>}</div><span>初始额度 <em>{Number(plan.monthly_credits).toLocaleString()} 分</em></span><button onClick={() => beginPlanEdit(plan)}>修改</button></article>)}</div>{editingPlanId && <form className="plan-editor" onSubmit={savePlan}><label>套餐名称<input required maxLength={32} value={planName} onChange={event => setPlanName(event.target.value)} placeholder="例如：team" /></label><label>新用户初始额度<input type="number" min="0" max="10000000" required value={planCredits} onChange={event => setPlanCredits(event.target.value)} /></label><label className="default-plan-toggle"><input type="checkbox" checked={planDefault} onChange={event => setPlanDefault(event.target.checked)} />设为新用户默认套餐</label><div><button type="button" onClick={() => setEditingPlanId(null)} disabled={savingPlan}>取消</button><button disabled={savingPlan}>{savingPlan ? "正在保存…" : "保存套餐"}</button></div></form>}</section>
       <section className="referral-management"><div><span>邀请码奖励</span><h2>注册奖励配置</h2><p>新用户注册时填写有效邀请码后，获得此处设置的额外 AI 额度。</p></div><form onSubmit={saveReferralBonus}><label>奖励额度<input type="number" min="0" max="10000000" required value={referralBonus} onChange={event => setReferralBonus(event.target.value)} /><small>分</small></label><button disabled={referralSaving}>{referralSaving ? "保存中…" : "保存奖励"}</button></form></section>
-      <section className="model-management"><div className="model-management-head"><div><span>前端模型权限</span><h2>允许用户调用的模型</h2><p>列表来自模型服务的 <code>GET /v1/models</code>。保存后，未勾选模型将不能被前端调用。</p></div><div><button type="button" className="admin-refresh" onClick={loadModels} disabled={modelsLoading || modelsSaving}>{modelsLoading ? "读取中…" : "刷新列表"}</button><button type="button" className="admin-save-models" onClick={saveModels} disabled={modelsLoading || modelsSaving || !catalogModels.length}>{modelsSaving ? "正在保存…" : `保存 ${selectedModelIds.size} 个模型`}</button></div></div>{!modelsLoading && <div className="model-search"><Search size={16}/><input value={modelSearch} onChange={event => setModelSearch(event.target.value)} placeholder="搜索模型、模型 ID 或厂商" /><span>{visibleModels.length} / {catalogModels.length}</span></div>}{modelsLoading ? <p className="model-empty">正在从模型服务读取列表…</p> : <div className="model-provider-groups">{Object.entries(modelGroups).map(([provider, items]) => <details key={provider} open><summary><span>{provider}</span><b>{items.filter(item => selectedModelIds.has(item.id)).length} / {items.length}</b></summary><div>{items.map(item => <label key={item.id} className="model-option"><input type="checkbox" checked={selectedModelIds.has(item.id)} onChange={() => toggleModel(item.id)} /><span>{item.name}</span><small>{item.id}</small></label>)}</div></details>)}{!visibleModels.length && <p className="model-empty">没有匹配的模型</p>}</div>}</section>
+      <section className="model-management"><div className="model-management-head"><div><span>模型会员权限</span><h2>Free 与 Pro 可用模型</h2><p>Free 用户可见全部模型，但只能选择标记为 Free 的模型；Pro 可使用标记为 Pro 的模型。</p></div><div><button type="button" className="admin-refresh" onClick={loadModels} disabled={modelsLoading || modelsSaving}>{modelsLoading ? "读取中…" : "刷新列表"}</button><button type="button" className="admin-save-models" onClick={saveModels} disabled={modelsLoading || modelsSaving || !catalogModels.length}>{modelsSaving ? "正在保存…" : "保存模型权限"}</button></div></div>{!modelsLoading && <div className="model-search"><Search size={16}/><input value={modelSearch} onChange={event => setModelSearch(event.target.value)} placeholder="搜索模型、模型 ID 或厂商" /><span>Free {freeModelIds.size} · Pro {selectedModelIds.size}</span></div>}{modelsLoading ? <p className="model-empty">正在从模型服务读取列表…</p> : <div className="model-provider-groups">{Object.entries(modelGroups).map(([provider, items]) => <details key={provider} open><summary><span>{provider}</span><b>{items.length} 个模型</b></summary><div>{items.map(item => <div key={item.id} className="model-option"><span>{item.name}<small>{item.id}</small></span><label>Free<input type="checkbox" checked={freeModelIds.has(item.id)} onChange={() => toggleFreeModel(item.id)} /></label><label>Pro<input type="checkbox" checked={selectedModelIds.has(item.id)} onChange={() => toggleModel(item.id)} /></label></div>)}</div></details>)}{!visibleModels.length && <p className="model-empty">没有匹配的模型</p>}</div>}</section>
       <section className="admin-table-wrap"><table><thead><tr><th>用户</th><th>套餐</th><th>剩余额度</th><th>邀请码 / 邀请</th><th>文献库</th><th>状态</th><th>注册时间</th><th></th></tr></thead><tbody>{users.map(item => <tr key={item.user_id}><td><strong>{item.display_name || item.username || "未命名用户"}</strong><span>{item.email}</span></td><td><b className="plan-pill">{(item.plan_name || "-").toUpperCase()}</b></td><td><strong className="credit-number">{Number(item.credits_remaining).toLocaleString()}</strong></td><td><div className="admin-referral-usage"><strong>{item.invite_code || "-"}</strong><span>{item.invited_by_email ? `受邀：${item.invited_by_email}` : "自主注册"}</span><em>已邀 {Number(item.successful_referral_count || 0)} 人 · 奖励 +{Number(item.referral_bonus_credits || 0)}</em></div></td><td><div className="admin-library-usage"><strong>{Number(item.library_paper_count || 0).toLocaleString()} 篇</strong><span>{formatStorage(Number(item.library_storage_bytes || 0))}</span></div></td><td><i className={item.status === "active" ? "status-active" : ""}>{item.status}</i></td><td>{new Date(item.created_at).toLocaleDateString("zh-CN")}</td><td><button className="row-action" onClick={() => openUser(item)}>管理</button></td></tr>)}</tbody></table>{!loading && !users.length && <div className="admin-empty">没有找到匹配用户</div>}{loading && <div className="admin-empty">正在加载…</div>}</section>
       <footer className="admin-pagination"><span>共 {total} 位用户</span><div><button disabled={page <= 1} onClick={() => setPage(value => value - 1)}><ChevronLeft size={16}/></button><b>{page} / {pages}</b><button disabled={page >= pages} onClick={() => setPage(value => value + 1)}><ChevronRight size={16}/></button></div></footer>
     </main>}

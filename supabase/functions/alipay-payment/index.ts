@@ -12,15 +12,15 @@ Deno.serve(async req => {
     const currentUser = await user(req); const db = admin();
     if (req.method === "GET") {
       const orderNo = new URL(req.url).searchParams.get("outTradeNo") || "";
-      const { data, error } = await db.from("payment_orders").select("out_trade_no,status,credits,amount_cents,paid_at").eq("out_trade_no", orderNo).eq("user_id", currentUser.id).maybeSingle();
+      const { data, error } = await db.from("payment_orders").select("out_trade_no,status,credits,amount_cents,product_type,duration_days,paid_at").eq("out_trade_no", orderNo).eq("user_id", currentUser.id).maybeSingle();
       if (error || !data) throw new Error("ORDER_NOT_FOUND"); return json({ order: data });
     }
     if (req.method !== "POST") return json({ error: "METHOD_NOT_ALLOWED" }, 405);
     const productCode = String((await body(req)).productCode || "");
-    const { data: product, error: productError } = await db.from("payment_products").select("code,name,credits,amount_cents").eq("code", productCode).eq("active", true).maybeSingle();
+    const { data: product, error: productError } = await db.from("payment_products").select("code,name,credits,amount_cents,product_type,duration_days").eq("code", productCode).eq("active", true).maybeSingle();
     if (productError || !product) throw new Error("PRODUCT_NOT_FOUND");
     const outTradeNo = `SHD${Date.now()}${crypto.getRandomValues(new Uint32Array(1))[0].toString(36).toUpperCase()}`.slice(0, 64);
-    const { error: insertError } = await db.from("payment_orders").insert({ out_trade_no: outTradeNo, user_id: currentUser.id, product_code: product.code, product_name: product.name, credits: product.credits, amount_cents: product.amount_cents });
+    const { error: insertError } = await db.from("payment_orders").insert({ out_trade_no: outTradeNo, user_id: currentUser.id, product_code: product.code, product_name: product.name, credits: product.credits, amount_cents: product.amount_cents, product_type: product.product_type, duration_days: product.duration_days });
     if (insertError) throw insertError;
     const params: Record<string, string> = { app_id: env("ALIPAY_APP_ID"), method: "alipay.trade.page.pay", format: "JSON", charset: "utf-8", sign_type: "RSA2", timestamp: new Date().toISOString().replace("T", " ").slice(0, 19), version: "1.0", notify_url: env("ALIPAY_NOTIFY_URL"), return_url: env("ALIPAY_RETURN_URL"), biz_content: JSON.stringify({ out_trade_no: outTradeNo, product_code: "FAST_INSTANT_TRADE_PAY", total_amount: amount(product.amount_cents), subject: product.name }) };
     params.sign = await sign(params);

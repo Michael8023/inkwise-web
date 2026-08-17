@@ -92,11 +92,14 @@ Deno.serve(async req => {
       if (url.searchParams.get("models") === "catalog") {
         const [remote, { data: catalog, error: catalogError }] = await Promise.all([
           upstreamModels(),
-          db.from("model_catalog").select("model_id,enabled"),
+          db.from("model_catalog").select("model_id,enabled,free_enabled,pro_enabled"),
         ]);
         if (catalogError) throw catalogError;
         const catalogById = new Map((catalog || []).map(item => [item.model_id, item]));
-        return json({ models: remote.map(item => ({ ...item, enabled: !!catalogById.get(item.id)?.enabled })) });
+        return json({ models: remote.map(item => {
+          const saved = catalogById.get(item.id);
+          return { ...item, enabled: !!saved?.enabled, free_enabled: !!saved?.free_enabled, pro_enabled: !!saved?.pro_enabled };
+        }) });
       }
       if (url.searchParams.get("balance") === "1") return json({ balance: await upstreamBalance(), checkedAt: new Date().toISOString() });
       const detailUserId = url.searchParams.get("userId");
@@ -165,13 +168,15 @@ Deno.serve(async req => {
           id: String(item?.id || "").trim(),
           name: String(item?.name || item?.id || "").trim(),
           provider: String(item?.provider || "其他").trim(),
-        }));
-        if (normalized.some(item => !/^[a-zA-Z0-9._:/-]{1,180}$/.test(item.id) || !item.name || item.name.length > 180 || item.provider.length > 48) || new Set(normalized.map(item => item.id)).size !== normalized.length) throw new Error("INVALID_MODELS");
+          freeEnabled: item?.freeEnabled === true,
+          proEnabled: item?.proEnabled === true,
+        })).filter(item => item.freeEnabled || item.proEnabled);
+        if (!normalized.length || normalized.some(item => !/^[a-zA-Z0-9._:/-]{1,180}$/.test(item.id) || !item.name || item.name.length > 180 || item.provider.length > 48) || !normalized.some(item => item.freeEnabled) || new Set(normalized.map(item => item.id)).size !== normalized.length) throw new Error("INVALID_MODELS");
         // PostgREST refuses broad updates without a predicate. Keep the
         // allow-list update explicit here instead of relying on a database
         // routine whose broad disable step can be rejected by the gateway.
         const { error: disableError } = await db.from("model_catalog")
-          .update({ enabled: false })
+          .update({ enabled: false, free_enabled: false, pro_enabled: false })
           .neq("model_id", "");
         if (disableError) throw disableError;
         const { error: upsertError } = await db.from("model_catalog").upsert(
@@ -179,7 +184,9 @@ Deno.serve(async req => {
             model_id: item.id,
             display_name: item.name,
             provider: item.provider,
-            enabled: true,
+            enabled: item.freeEnabled || item.proEnabled,
+            free_enabled: item.freeEnabled,
+            pro_enabled: item.proEnabled,
             available_features: ["summary", "explain", "chat", "visual"],
           })),
           { onConflict: "model_id" },
