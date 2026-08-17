@@ -1,85 +1,74 @@
-import { body, json, rateLimit, user } from "../_shared/core.ts";
-import { preflight } from "../_shared/cors.ts";
+import { corsHeaders, preflight } from "../_shared/cors.ts";
+import { admin, body, json, rateLimit, refund_credits, user } from "../_shared/core.ts";
 
-type Action = "templates" | "generate" | "download";
+type Action = "outline" | "content" | "status" | "download";
 
-function clean(value: unknown, limit: number) {
-  return String(value || "").replace(/\u0000/g, "").trim().slice(0, limit);
+const paths: Record<Action, string> = {
+  outline: "/docmee/v1/api/ppt/generateOutline",
+  content: "/docmee/v1/api/ppt/generateContent",
+  status: "/docmee/v1/api/ppt/asyncPptInfo",
+  download: "/docmee/v1/api/ppt/downloadPptx",
+};
+
+function clean(value: unknown, limit: number) { return String(value || "").replace(/\u0000/g, "").trim().slice(0, limit); }
+function urlFor(baseUrl: string, path: string) { return `${baseUrl.replace(/\/+$/, "")}${path}`; }
+function responseData(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object") return {};
+  const root = value as Record<string, unknown>;
+  return (root.data && typeof root.data === "object" ? root.data : root) as Record<string, unknown>;
 }
 
-async function docmeeToken(uid: string) {
-  const apiKey = Deno.env.get("DOCMEE_API_KEY");
-  if (!apiKey) throw new Error("DOCMEE_NOT_CONFIGURED");
-  const response = await fetch("https://docmee.cn/api/user/createApiToken", {
-    method: "POST",
-    headers: { "Api-Key": apiKey, "Content-Type": "application/json" },
-    body: JSON.stringify({ uid: `pdf-ai-reader:${uid}` }),
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok || Number(payload?.code) !== 0 || !payload?.data?.token) {
-    throw new Error(`DOCMEE_TOKEN_FAILED${payload?.message ? `:${payload.message}` : ""}`);
-  }
-  return String(payload.data.token);
-}
-
-async function docmeeRequest(token: string, path: string, value: unknown) {
-  const response = await fetch(`https://docmee.cn${path}`, {
-    method: "POST",
-    headers: { token, "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify(value),
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok || Number(payload?.code) !== 0) {
-    throw new Error(`DOCMEE_REQUEST_FAILED${payload?.message ? `:${payload.message}` : `_${response.status}`}`);
-  }
-  return payload?.data || {};
-}
-
-function templateList(value: unknown): Record<string, unknown>[] {
-  if (Array.isArray(value)) return value.filter((item): item is Record<string, unknown> => !!item && typeof item === "object");
-  if (!value || typeof value !== "object") return [];
-  const result = value as Record<string, unknown>;
-  for (const key of ["list", "records", "templates", "items"]) {
-    if (Array.isArray(result[key])) return result[key].filter((item): item is Record<string, unknown> => !!item && typeof item === "object");
-  }
-  return [];
-}
-
-/** Pure API integration: no Docmee UI or client-side credential is required. */
 Deno.serve(async (req) => {
   const cors = preflight(req); if (cors) return cors;
   try {
     const currentUser = await user(req);
-    await rateLimit(currentUser.id, "docmee_ppt", 12);
+    await rateLimit(currentUser.id, "ai_ppt", 10);
     const input = await body(req);
     const action = clean(input.action, 20) as Action;
-    if (!(["templates", "generate", "download"] as string[]).includes(action)) throw new Error("DOCMEE_ACTION_INVALID");
-    const token = await docmeeToken(currentUser.id);
-
-    if (action === "templates") {
-      const templates = await docmeeRequest(token, "/api/ppt/randomTemplates", { size: 8, filters: { type: 1 } });
-      return json({ templates: templateList(templates).map((item) => ({
-        id: clean(item.id, 160), name: clean(item.name || item.title || "学术模板", 160),
-        coverUrl: clean(item.coverUrl || item.cover || item.cover_url, 2000) || undefined,
-      })).filter((item: { id: string }) => item.id) });
+    if (!Object.hasOwn(paths, action)) throw new Error("PPT_ACTION_INVALID");
+    const request = input.request && typeof input.request === "object" ? input.request as Record<string, unknown> : {};
+    const startsPptTask = action === "content" && Boolean(request.asyncGenPptx);
+    const billingRequestId = clean(request.billingRequestId, 160);
+    if (startsPptTask && !billingRequestId) throw new Error("PPT_BILLING_REQUEST_REQUIRED");
+    if (startsPptTask) {
+      const { data, error } = await admin().rpc("consume_ai_ppt_quota", {
+        p_user_id: currentUser.id, p_request_id: billingRequestId,
+        p_input_chars: clean(request.outlineMarkdown, 100_000).length,
+      });
+      if (error) throw error;
+      if (!data?.ok) throw new Error(String(data?.error || "PPT_QUOTA_EXCEEDED"));
     }
 
-    if (action === "generate") {
-      const markdown = clean(input.markdown, 20_000);
-      const templateId = clean(input.templateId, 160);
-      if (!markdown) throw new Error("PPT_MARKDOWN_REQUIRED");
-      const pptInfo = await docmeeRequest(token, "/api/ppt/generatePptx", { templateId: templateId || undefined, outlineContentMarkdown: markdown, pptxProperty: false });
-      const id = clean(typeof pptInfo === "string" ? pptInfo : pptInfo.id || pptInfo.pptId, 160);
-      if (!id) throw new Error("DOCMEE_PPT_ID_MISSING");
-      return json({ pptId: id, name: clean(typeof pptInfo === "object" ? pptInfo.name : "", 300) || undefined });
+    const configuredBase = (Deno.env.get("APILIO_BASE_URL") || "https://api.apilio.ai/v1").replace(/\/+$/, "");
+    const baseUrl = configuredBase.replace(/\/v1$/, "");
+    const apiKey = Deno.env.get("APILIO_API_KEY");
+    if (!apiKey) throw new Error("APILIO_NOT_CONFIGURED");
+    const stream = Boolean(request.stream) && (action === "outline" || action === "content");
+    const target = action === "status"
+      ? `${urlFor(baseUrl, paths.status)}?pptId=${encodeURIComponent(clean(request.pptId, 300))}`
+      : urlFor(baseUrl, paths[action]);
+    const upstreamBody = action === "outline" ? { subject: clean(request.subject, 60_000) }
+      : action === "content" ? { outlineMarkdown: clean(request.outlineMarkdown, 100_000), asyncGenPptx: startsPptTask }
+      : { id: clean(request.id, 300) };
+    const upstream = await fetch(target, {
+      method: action === "status" ? "GET" : "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json", Accept: stream ? "text/event-stream" : "application/json" },
+      body: action === "status" ? undefined : JSON.stringify(upstreamBody),
+    });
+    if (!upstream.ok) {
+      const detail = clean(await upstream.text(), 500);
+      if (startsPptTask) await refund_credits(billingRequestId, `APILIO_PPT_${upstream.status}`);
+      throw new Error(`APILIO_PPT_${upstream.status}${detail ? `:${detail}` : ""}`);
     }
-
-    const id = clean(input.pptId, 160);
-    if (!id) throw new Error("PPT_ID_REQUIRED");
-    const pptInfo = await docmeeRequest(token, "/api/ppt/downloadPptx", { id });
-    return json({ pptId: id, fileUrl: clean(typeof pptInfo === "string" ? pptInfo : pptInfo.fileUrl || pptInfo.file_url || pptInfo.url, 2000) || undefined });
+    if (stream && upstream.body) return new Response(upstream.body, { headers: { ...corsHeaders, "Content-Type": "text/event-stream", "Cache-Control": "no-cache" } });
+    const payload = await upstream.json().catch(() => ({}));
+    const data = responseData(payload);
+    return json({ data: payload, pptId: clean(data.pptId || data.ppt_id || data.id, 300) || undefined,
+      fileUrl: clean(data.fileUrl || data.file_url || data.downloadUrl || data.url, 2_000) || undefined,
+      total: Number(data.total || 0) || undefined, current: Number(data.current || 0) || undefined,
+      progress: Number(data.progress || data.percent || 0) || undefined, status: clean(data.status || data.state, 100) || undefined });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "DOCMEE_REQUEST_FAILED";
+    const message = error instanceof Error ? error.message : "AI_PPT_FAILED";
     return json({ error: message }, message === "AUTH_REQUIRED" ? 401 : 400);
   }
 });
