@@ -42,7 +42,8 @@ async function upstreamBalance() {
   const numeric = (value: unknown) => Number.isFinite(Number(value)) ? Number(value) : 0;
   const totalAvailable = numeric(data.quota);
   const totalUsed = numeric(data.used_quota);
-  return { name: String(data.display_name || data.username || "Apilio"), totalGranted: totalAvailable + totalUsed, totalUsed, totalAvailable, unlimited: false, expiresAt: null };
+  const quotaPerUsd = Math.max(1, numeric(Deno.env.get("APILIO_QUOTA_PER_USD") || 500000));
+  return { name: String(data.display_name || data.username || "Apilio"), totalGranted: totalAvailable + totalUsed, totalUsed, totalAvailable, availableAmountUsd: totalAvailable / quotaPerUsd, usedAmountUsd: totalUsed / quotaPerUsd, quotaPerUsd, unlimited: false, expiresAt: null };
 }
 
 async function requireAdmin(req: Request) {
