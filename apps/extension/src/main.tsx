@@ -2806,7 +2806,6 @@ function App() {
               <button className={sidePanelTab === "notes" ? "active" : ""} role="tab" aria-selected={sidePanelTab === "notes"} onClick={() => setSidePanelTab("notes")}><StickyNote size={15} /> 笔记 <span className="note-count">{selections.filter(item => item.note?.trim()).length}</span></button>
               <button className={sidePanelTab === "brainstorm" ? "active" : ""} role="tab" aria-selected={sidePanelTab === "brainstorm"} onClick={() => setSidePanelTab("brainstorm")}><Brain size={15} /> Brainstorm</button>
             </div>
-            <span className="panel-status">{usage && <small className="quota-badge">{usage.plan} · {usage.creditsRemaining} 分</small>}</span>
             <IconButton label="收起面板" onClick={() => setPanelOpen(false)}>
               <ChevronRight size={17} />
             </IconButton>
