@@ -40,6 +40,33 @@ async function stream(action: "outline" | "content", requestBody: Record<string,
 }
 function persist(tasks: Task[]) { try { localStorage.setItem(storageKey, JSON.stringify(tasks.slice(0, 30))); } catch { /* Local history is optional. */ } }
 
+const captionLine = /(?:\b(?:figure|fig\.?|scheme|chart|table)\s*\d|(?:图|表|图注|图例|表注)\s*\d)/i;
+const tableDivider = /^\s*\|?(?:\s*:?-{3,}:?\s*\|)+\s*$/;
+const tableLine = /^\s*\|.*\|\s*$/;
+
+function nearbyCaption(lines: string[], start: number, end: number) {
+  const candidates = [lines[start - 2], lines[start - 1], lines[end], lines[end + 1]];
+  return candidates.filter(line => line && captionLine.test(line.trim())).map(line => line.trim());
+}
+
+/** Keeps structured experimental evidence without sending the whole paper. */
+function extractEvidenceMarkdown(markdown: string) {
+  const lines = markdown.replace(/\r\n/g, "\n").split("\n");
+  const parts: string[] = [], seen = new Set<string>();
+  const add = (value: string) => { const trimmed = value.trim(); if (trimmed && !seen.has(trimmed)) { seen.add(trimmed); parts.push(trimmed); } };
+  for (let index = 0; index < lines.length; index += 1) {
+    if (tableLine.test(lines[index]) && tableDivider.test(lines[index + 1] || "")) {
+      const start = index; while (index < lines.length && tableLine.test(lines[index])) index += 1;
+      nearbyCaption(lines, start, index).forEach(add); add(lines.slice(start, index).join("\n")); index -= 1;
+      continue;
+    }
+    const image = lines[index].match(/!\[([^\]]+)\]\([^)]*\)/);
+    if (image?.[1]?.trim()) add(`图例：${image[1].trim()}`);
+    if (captionLine.test(lines[index])) add(lines[index]);
+  }
+  return parts.join("\n\n");
+}
+
 export function PptStudio({ papers, extractText, loadLayoutMarkdown }: { papers: LibraryPaper[]; extractText: (paper: LibraryPaper) => Promise<string>; loadLayoutMarkdown: (paperId: string) => Promise<string> }) {
   const usablePapers = useMemo(() => papers.filter(item => !item.archived_at), [papers]);
   const [paperId, setPaperId] = useState(""), [prompt, setPrompt] = useState(""), [tasks, setTasks] = useState<Task[]>([]), [activeId, setActiveId] = useState<string | null>(null), [error, setError] = useState("");
@@ -67,10 +94,10 @@ export function PptStudio({ papers, extractText, loadLayoutMarkdown }: { papers:
     setTasks(current => { const next = [task, ...current].slice(0, 30); taskRef.current = next; persist(next); return next; }); setActiveId(id); setError("");
     try {
       const layoutMarkdown = await loadLayoutMarkdown(paper.id);
-      const source = layoutMarkdown.trim() || await extractText(paper);
+      const source = layoutMarkdown.trim() ? extractEvidenceMarkdown(layoutMarkdown) : await extractText(paper);
       if (!source.trim()) throw new Error("未能读取论文资料，请先完成 PDF 解析。");
       update(id, { phase: "outlining" });
-      const subject = [prompt.trim() || "制作学术汇报 PPT，突出研究问题、方法、实验结果、局限性和结论。", `# ${paper.title}`, "## 资料来源", source].join("\n\n").slice(0, 60_000);
+      const subject = [prompt.trim() || "制作学术汇报 PPT，突出实验结果、数据表格和图例。", `# ${paper.title}`, "## MinerU 提取的表格与图例（唯一数据来源）", "- 保留所有表格单元格数值、单位、样本量、误差和显著性标记，不得补造数据。", "- 每个表格必须在 PPT 中作为数据表或图表呈现；图例仅可作为对应图表的解释。", source].join("\n\n").slice(0, 60_000);
       const outline = await stream("outline", { subject }, markdown => update(id, { markdown }), () => undefined);
       const markdown = outline || taskRef.current.find(item => item.id === id)?.markdown || subject;
       update(id, { markdown, phase: "generating" });
@@ -81,6 +108,6 @@ export function PptStudio({ papers, extractText, loadLayoutMarkdown }: { papers:
     } catch (caught) { const message = errorMessage(caught instanceof Error ? caught.message : caught); update(id, { phase: "failed", error: message }); setError(message); }
   }
   const label = (task: Task) => ({ reading: "读取资料", outlining: "生成大纲", generating: "排版生成中", completed: "已完成", failed: "已失败" })[task.phase];
-  if (active) return <section className="ppt-studio ppt-studio-v2 ppt-detail-page"><header><div><span><Presentation size={15}/> PPT TASK DETAIL</span><h1>{active.paperTitle}</h1><p>创建于 {new Date(active.createdAt).toLocaleString("zh-CN")} · {label(active)}</p></div><button className="ppt-back" onClick={() => setActiveId(null)}><ArrowLeft size={16}/>返回任务列表</button></header>{active.result.fileUrl && <a className="ppt-download" href={active.result.fileUrl} target="_blank" rel="noreferrer"><Download size={16}/>下载 PPT</a>}{active.error && <p className="ppt-error">{active.error}</p>}<section className="ppt-markdown-panel"><div className="ppt-panel-heading"><span><MonitorPlay size={16}/>生成大纲</span><small>{label(active)}</small></div><div className="ppt-markdown-scroll">{active.markdown ? <ReactMarkdown>{active.markdown}</ReactMarkdown> : <div className="ppt-preview-empty"><LoaderCircle className="ppt-spin" size={28}/><p>正在读取 MinerU 版面分析资料并生成大纲。</p></div>}</div></section><section className="ppt-slide-panel"><div className="ppt-panel-heading"><span><Presentation size={16}/>PPT 生成状态</span><small>{active.result.total ? `${active.result.current || 0} / ${active.result.total} 页` : label(active)}</small></div><div className="ppt-preview-empty">{active.phase === "completed" ? <Download size={30}/> : <LoaderCircle className="ppt-spin" size={30}/>}<p>{active.phase === "completed" ? "PPT 已完成，可下载并在 PowerPoint/WPS 中编辑。" : "版面正在生成，任务会在后台持续更新。"}</p></div></section></section>;
-  return <section className="ppt-studio ppt-studio-v2"><header><div><span><Presentation size={15}/> AI PRESENTATION</span><h1>AI PPT 制作</h1><p>从 MinerU 版面分析资料创建任务，在任务中心跟踪大纲、排版和下载。</p></div></header><form className="ppt-form ppt-config" onSubmit={event => { event.preventDefault(); void createTask(); }}><label>选择 PDF<select value={paperId} onChange={event => setPaperId(event.target.value)}>{usablePapers.map(item => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label><label className="ppt-prompt">制作要求<textarea value={prompt} onChange={event => setPrompt(event.target.value)} maxLength={2_000} placeholder="例如：面向组会汇报，突出消融实验、数据表格和统计显著性，控制在 10 页以内。"/></label><button className="ppt-generate" disabled={!paper}><Sparkles size={17}/>创建 PPT 任务</button>{error && <p className="ppt-error">{error}</p>}</form><section className="ppt-history ppt-task-list"><div className="ppt-history-head"><span><History size={16}/>PPT 任务 <b>{tasks.length}</b></span><small>点击任务查看大纲、生成进度和下载文件</small></div><div className="ppt-history-list">{tasks.length ? tasks.map(task => <article key={task.id}><button type="button" onClick={() => setActiveId(task.id)}><Presentation size={17}/><span><b>{task.paperTitle}</b><small>{new Date(task.createdAt).toLocaleString("zh-CN")}</small></span></button><em className={`ppt-status ${task.phase}`}>{label(task)}</em></article>) : <p>还没有 PPT 任务。选择 PDF 并创建任务后会显示在这里。</p>}</div></section></section>;
+  if (active) return <section className="ppt-studio ppt-studio-v2 ppt-detail-page"><header><div><span><Presentation size={15}/> PPT TASK DETAIL</span><h1>{active.paperTitle}</h1><p>创建于 {new Date(active.createdAt).toLocaleString("zh-CN")} · {label(active)}</p></div><button className="ppt-back" onClick={() => setActiveId(null)}><ArrowLeft size={16}/>返回任务列表</button></header>{active.result.fileUrl && <a className="ppt-download" href={active.result.fileUrl} target="_blank" rel="noreferrer"><Download size={16}/>下载 PPT</a>}{active.error && <p className="ppt-error">{active.error}</p>}<section className="ppt-markdown-panel"><div className="ppt-panel-heading"><span><MonitorPlay size={16}/>生成大纲</span><small>{label(active)}</small></div><div className="ppt-markdown-scroll">{active.markdown ? <ReactMarkdown>{active.markdown}</ReactMarkdown> : <div className="ppt-preview-empty"><LoaderCircle className="ppt-spin" size={28}/><p>正在筛选 MinerU 的表格和图例并生成大纲。</p></div>}</div></section><section className="ppt-slide-panel"><div className="ppt-panel-heading"><span><Presentation size={16}/>PPT 生成状态</span><small>{active.result.total ? `${active.result.current || 0} / ${active.result.total} 页` : label(active)}</small></div><div className="ppt-preview-empty">{active.phase === "completed" ? <Download size={30}/> : <LoaderCircle className="ppt-spin" size={30}/>}<p>{active.phase === "completed" ? "PPT 已完成，可下载并在 PowerPoint/WPS 中编辑。" : "版面正在生成，任务会在后台持续更新。"}</p></div></section></section>;
+  return <section className="ppt-studio ppt-studio-v2"><header><div><span><Presentation size={15}/> AI PRESENTATION</span><h1>AI PPT 制作</h1><p>仅从 MinerU 表格和图例创建任务，在任务中心跟踪大纲、排版和下载。</p></div></header><form className="ppt-form ppt-config" onSubmit={event => { event.preventDefault(); void createTask(); }}><label>选择 PDF<select value={paperId} onChange={event => setPaperId(event.target.value)}>{usablePapers.map(item => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label><label className="ppt-prompt">制作要求<textarea value={prompt} onChange={event => setPrompt(event.target.value)} maxLength={2_000} placeholder="例如：面向组会汇报，突出消融实验、数据表格和统计显著性，控制在 10 页以内。"/></label><button className="ppt-generate" disabled={!paper}><Sparkles size={17}/>创建 PPT 任务</button>{error && <p className="ppt-error">{error}</p>}</form><section className="ppt-history ppt-task-list"><div className="ppt-history-head"><span><History size={16}/>PPT 任务 <b>{tasks.length}</b></span><small>点击任务查看大纲、生成进度和下载文件</small></div><div className="ppt-history-list">{tasks.length ? tasks.map(task => <article key={task.id}><button type="button" onClick={() => setActiveId(task.id)}><Presentation size={17}/><span><b>{task.paperTitle}</b><small>{new Date(task.createdAt).toLocaleString("zh-CN")}</small></span></button><em className={`ppt-status ${task.phase}`}>{label(task)}</em></article>) : <p>还没有 PPT 任务。选择 PDF 并创建任务后会显示在这里。</p>}</div></section></section>;
 }
