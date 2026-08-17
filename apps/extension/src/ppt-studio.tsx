@@ -62,8 +62,16 @@ export function PptStudio({ papers, extractText }: { papers: LibraryPaper[]; ext
   const instruction = async () => { if (!paper) throw new Error("请先在文献工作台添加并选择一份 PDF。"); const source = await extractText(paper); return `${prompt.trim() || "请将这篇文献制作成逻辑清晰、适合汇报的中文演示文稿。"}\n\n参考 PDF：《${paper.title}》\n\n${source}`.slice(0, 60000); };
   const capturePptId = (id: string) => { const next = { ...result, pptId: id }; setResult(next); saveJob(next); };
   async function generateMarkdown(alsoGeneratePpt: boolean) { setError(""); setState("reading"); try { const subject = await instruction(); setState("generating"); let taskId = ""; const setText = (text: string) => setMarkdown(text); const setTask = (id: string) => { taskId = id; capturePptId(id); }; const outline = await pptStream("outline", { subject }, setText, setTask); const content = await pptStream("content", { outlineMarkdown: outline || markdown, asyncGenPptx: alsoGeneratePpt }, setText, setTask); setMarkdown(content || outline); if (alsoGeneratePpt && taskId) setState("polling"); else setState("editing"); } catch (caught) { setState("error"); setError(caught instanceof Error ? caught.message : "Markdown 生成失败，请稍后重试。"); } }
-  async function generatePptFromMarkdown() { if (!markdown.trim()) { await generateMarkdown(false); return; } setError(""); setState("generating"); try { const next = await pptRequest("markdown", { markdown }); setResult(next); saveJob(next); setState(next.fileUrl ? "done" : "polling"); } catch (caught) { setState("error"); setError(caught instanceof Error ? caught.message : "PPT 生成失败，请稍后重试。"); } }
-  async function directGenerate() { setError(""); setState("reading"); try { const subject = await instruction(); setState("generating"); const next = await pptRequest("direct", { subject }); setResult(next); saveJob(next); setState(next.fileUrl ? "done" : "polling"); } catch (caught) { setState("error"); setError(caught instanceof Error ? caught.message : "PPT 生成失败，请稍后重试。"); } }
+  async function generatePptFromMarkdown() {
+    if (!markdown.trim()) { await generateMarkdown(false); return; }
+    setError(""); setState("generating");
+    try {
+      let taskId = "";
+      await pptStream("content", { outlineMarkdown: markdown, asyncGenPptx: true }, () => undefined, id => { taskId = id; capturePptId(id); });
+      setState(taskId ? "polling" : "done");
+    } catch (caught) { setState("error"); setError(caught instanceof Error ? caught.message : "PPT 生成失败，请稍后重试。"); }
+  }
+  async function directGenerate() { await generateMarkdown(true); }
   const busy = ["reading", "generating", "polling"].includes(state); const markdownLocked = mode !== "markdown" && busy;
   const run = mode === "direct" ? directGenerate : mode === "stream" ? () => generateMarkdown(true) : generatePptFromMarkdown;
   return <section className="ppt-studio ppt-studio-v2">
