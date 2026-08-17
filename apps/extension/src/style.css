@@ -1887,3 +1887,19 @@ body.is-resizing-panel * {
 .brainstorm-result :is(p,ul,ol) { margin: 7px 0; padding-left: 18px; }
 .brainstorm-empty { min-height: 260px; display: grid; place-content: center; justify-items: center; gap: 9px; padding: 26px; color: var(--text-muted); text-align: center; }
 .brainstorm-empty svg { color: var(--accent); }.brainstorm-empty strong { color: var(--text); font-size: 14px; }.brainstorm-empty p { margin: 0; font-size: 12px; line-height: 1.65; }
+
+/* Library hierarchy and invitation actions. */
+.account-invite-actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; margin-top: 3px; }
+.account-invite-actions button { display: inline-flex; align-items: center; gap: 4px; border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border)); border-radius: 6px; background: var(--surface); color: var(--accent); padding: 5px 7px; font-size: 10px; font-weight: 700; cursor: pointer; }
+.account-invite-actions button:disabled { opacity: .5; cursor: wait; }
+.library-folder-row { display: flex; align-items: center; gap: 2px; }
+.library-folder-row > button { min-width: 0; flex: 1; display: flex; align-items: center; gap: 8px; border: 0; border-radius: 8px; background: transparent; color: #506d7c; padding: 8px 6px; text-align: left; font-size: 12px; cursor: pointer; }
+.library-folder-row > button:hover,.library-folder-row > button.active { background: #e3f5f2; color: #057c80; font-weight: 700; }
+.library-folder-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.library-folder-row em { margin-left: auto; color: #8ba0aa; font-size: 10px; font-style: normal; }
+.library-folder-row > div { display: flex; opacity: .4; transition: opacity .15s ease; }
+.library-folder-row:hover > div,.library-folder-row:focus-within > div { opacity: 1; }
+.library-folder-row > div button,.library-tag-row > button:last-child { display: grid; place-items: center; border: 0; border-radius: 5px; background: transparent; color: #63818c; padding: 4px; cursor: pointer; }
+.library-folder-row > div button:hover,.library-tag-row > button:last-child:hover { background: #e3f5f2; color: #057c80; }
+.library-tag-row { display: flex; align-items: center; gap: 1px; }
+.library-tag-row > button:first-child { min-width: 0; flex: 1; }

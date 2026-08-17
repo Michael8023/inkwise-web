@@ -44,6 +44,7 @@ import {
   StickyNote,
   FilePlus2,
   Brain,
+  Link2,
 } from "lucide-react";
 import "./style.css";
 import { mountAdmin } from "./admin";
@@ -496,6 +497,9 @@ function AccountDialog({ session, usage, inviteCode, onClose, onSignOut, onOpenL
   const displayName = String(session.user.user_metadata?.display_name || session.user.user_metadata?.username || "识谛用户");
   const initial = displayName.trim().slice(0, 1).toUpperCase() || "I";
   const creditAmount = usage?.creditsRemaining ?? 0;
+  const [inviteCopied, setInviteCopied] = useState<"code" | "link" | "">("");
+  const inviteLink = inviteCode ? `${window.location.origin}${window.location.pathname}?invite=${encodeURIComponent(inviteCode)}` : "";
+  const copyInvite = async (kind: "code" | "link") => { const value = kind === "code" ? inviteCode : inviteLink; if (!value) return; await navigator.clipboard.writeText(value); setInviteCopied(kind); window.setTimeout(() => setInviteCopied(""), 1800); };
   return <div className="auth-backdrop"><section className="auth-dialog account-dialog">
     <button type="button" className="popover-close" onClick={onClose}><X size={16} /></button>
     <div className="auth-brand"><img src="/brand/shidea-mark.png" alt="" /><span>识谛 <em>shidea</em></span></div>
@@ -503,7 +507,7 @@ function AccountDialog({ session, usage, inviteCode, onClose, onSignOut, onOpenL
     <section className="account-credits"><div><span>可用 AI 额度</span><strong>{creditAmount}<small> 分</small></strong></div><div className="credit-orbit"><Sparkles size={19} /></div></section>
     <button type="button" className="account-purchase" onClick={onOpenPurchase}><Plus size={16}/>购买 AI 额度</button>
     <div className="quota-summary"><span>当前套餐<strong>{usage?.plan ? usage.plan.toUpperCase() : "FREE"}</strong></span><span>结算日期<strong>{usage?.periodEnd ? new Date(usage.periodEnd).toLocaleDateString("zh-CN", { month: "short", day: "numeric" }) : "每月"}</strong></span></div>
-    <section className="account-invite"><span>我的邀请码</span><strong>{inviteCode || "正在生成…"}</strong><small>好友注册时填写，即可获得后台设置的新人奖励。</small></section>
+    <section className="account-invite"><span>我的邀请码</span><strong>{inviteCode || "正在生成…"}</strong><small>好友注册时填写，即可获得后台设置的新人奖励。</small><div className="account-invite-actions"><button type="button" disabled={!inviteCode} onClick={() => void copyInvite("code")}><Copy size={13}/>{inviteCopied === "code" ? "已复制" : "复制邀请码"}</button><button type="button" disabled={!inviteLink} onClick={() => void copyInvite("link")}><Link2 size={13}/>{inviteCopied === "link" ? "已复制" : "复制邀请链接"}</button></div></section>
     <button type="button" className="account-library" onClick={onOpenLibrary}><span className="account-library-icon"><FolderOpen size={22}/></span><span className="account-library-copy"><small>个人文献工作台</small><strong>整理每一篇重要文献</strong><em>查看文献库、继续阅读与管理资料</em></span><ChevronRight size={19} /></button>
     <button type="button" className="account-feedback" onClick={onOpenFeedback}><MessageSquare size={16}/><span><small>共创识谛</small><strong>提交反馈与建议</strong></span><ChevronRight size={17}/></button>
     <button type="button" className="account-signout" onClick={onSignOut}><LogOut size={15} />退出登录</button>
@@ -1635,7 +1639,16 @@ function App() {
         setInviteCode("");
       }
     };
-    supabase.auth.getSession().then(({ data }) => applySession(data.session as AuthSession | null));
+    supabase.auth.getSession().then(({ data }) => {
+      const next = data.session as AuthSession | null;
+      applySession(next);
+      const params = new URL(window.location.href).searchParams;
+      const invite = (params.get("invite") || "").trim().toUpperCase();
+      if (!/^[A-Z0-9_-]{3,32}$/.test(invite)) return;
+      const cleanUrl = new URL(window.location.href); cleanUrl.searchParams.delete("invite"); window.history.replaceState({}, "", `${cleanUrl.pathname}${cleanUrl.search}${cleanUrl.hash}`);
+      if (next) setLibraryOpen(true);
+      else { setAuthMode("register"); setAuthInviteCode(invite); setAuthOpen(true); }
+    });
     const { data } = supabase.auth.onAuthStateChange((event, next) => {
       applySession(next as AuthSession | null, event === "SIGNED_IN");
     });
