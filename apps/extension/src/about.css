@@ -776,17 +776,23 @@ body.about-active #root {
 }
 .plan-grid > article > b {
   display: block;
+  background: transparent;
+  color: #153b46;
+  padding: 0;
   font-size: 31px;
   letter-spacing: -0.06em;
 }
 .plan-grid b small {
-  color: #6c7d84;
+  color: #087a75;
   font-size: 12px;
-  font-weight: 550;
+  font-weight: 750;
   letter-spacing: 0;
 }
+.plan-grid .pro > b {
+  color: #fff;
+}
 .plan-grid .pro b small {
-  color: #b4c9ca;
+  color: #a9f0e2;
 }
 .plan-grid ul {
   display: grid;
