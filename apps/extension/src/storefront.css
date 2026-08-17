@@ -1,0 +1,2 @@
+.purchase-redeem-link { display: inline-flex; align-items: center; justify-content: center; gap: 6px; width: 100%; margin-top: 11px; border: 1px solid color-mix(in srgb, var(--accent) 36%, var(--border)); border-radius: 8px; background: color-mix(in srgb, var(--accent-soft) 42%, var(--surface)); color: var(--accent); padding: 10px; font-size: 12px; font-weight: 750; text-decoration: none; transition: background .16s ease, transform .16s ease; }
+.purchase-redeem-link:hover { transform: translateY(-1px); background: var(--accent-soft); }

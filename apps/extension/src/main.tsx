@@ -45,8 +45,10 @@ import {
   FilePlus2,
   Brain,
   Link2,
+  KeyRound,
 } from "lucide-react";
 import "./style.css";
+import "./storefront.css";
 import { mountAdmin } from "./admin";
 import { AboutPage } from "./about";
 import { RedeemPage } from "./redeem";
@@ -534,7 +536,7 @@ function AccountDialog({ session, usage, inviteCode, onClose, onSignOut, onOpenL
 }
 
 function PurchaseDialog({ busy, error, onClose, onPurchase }: { busy: string; error: string; onClose: () => void; onPurchase: (code: string) => void }) {
-  return <div className="auth-backdrop"><section className="auth-dialog purchase-dialog"><button type="button" className="popover-close" onClick={onClose} disabled={Boolean(busy)}><X size={16}/></button><div className="auth-brand"><img src="/brand/shidea-mark.png" alt="" /><span>识谛 <em>shidea</em></span></div><div className="auth-heading"><h2>积分与 Pro 会员</h2><p>Free 用户每次 AI 调用固定消耗 2 积分；Pro 不扣积分。</p></div><div className="purchase-options"><button disabled={Boolean(busy)} onClick={() => onPurchase("points-50")}><span>积分包</span><strong>50 积分</strong><em>¥1</em></button><button disabled={Boolean(busy)} onClick={() => onPurchase("points-250")}><span>积分包</span><strong>250 积分</strong><em>¥5</em></button><button disabled={Boolean(busy)} onClick={() => onPurchase("points-500")}><span>积分包</span><strong>500 积分</strong><em>¥10</em></button><button className="purchase-pro" disabled={Boolean(busy)} onClick={() => onPurchase("pro-month")}><span>Pro 月卡 · 30 天</span><strong>无限 AI 使用</strong><em>¥30</em><small>单次购买，到期自动恢复 Free</small></button></div>{error && <p className="auth-feedback error">{error}</p>}{busy && <p className="auth-notice purchase-loading"><RefreshCw className="auth-spinner" size={15}/>{busy}</p>}<small className="purchase-note">支付成功后，积分或会员权益由支付宝异步通知确认并自动生效。</small></section></div>;
+  return <div className="auth-backdrop"><section className="auth-dialog purchase-dialog"><button type="button" className="popover-close" onClick={onClose} disabled={Boolean(busy)}><X size={16}/></button><div className="auth-brand"><img src="/brand/shidea-mark.png" alt="" /><span>识谛 <em>shidea</em></span></div><div className="auth-heading"><h2>积分与 Pro 会员</h2><p>购买将在链动小铺的新标签页完成；本页将带你进入兑换页面。</p></div><div className="purchase-options"><button disabled={Boolean(busy)} onClick={() => onPurchase("points-50")}><span>积分包</span><strong>50 积分</strong><em>¥1</em></button><button disabled={Boolean(busy)} onClick={() => onPurchase("points-250")}><span>积分包</span><strong>250 积分</strong><em>¥5</em></button><button disabled={Boolean(busy)} onClick={() => onPurchase("points-500")}><span>积分包</span><strong>500 积分</strong><em>¥10</em></button><button className="purchase-pro" disabled={Boolean(busy)} onClick={() => onPurchase("pro-month")}><span>Pro 月卡 · 30 天</span><strong>无限 AI 使用</strong><em>¥30</em><small>单次购买，到期自动恢复 Free</small></button></div><a className="purchase-redeem-link" href="/redeem"><KeyRound size={15}/>已有兑换码？立即兑换</a>{error && <p className="auth-feedback error">{error}</p>}{busy && <p className="auth-notice purchase-loading"><RefreshCw className="auth-spinner" size={15}/>{busy}</p>}<small className="purchase-note">购买成功后，复制链动小铺发放的卡密并在识谛兑换，即可自动到账。</small></section></div>;
 }
 
 function FeedbackScreen({ session, onBack }: { session: AuthSession; onBack: () => void }) {
@@ -2023,12 +2025,16 @@ function App() {
     await supabase.auth.signOut();
   }
   async function purchaseCredits(productCode: string) {
-    setPurchaseError(""); setPurchaseBusy("正在创建支付宝订单…");
-    try {
-      const response = await functionRequest("alipay-payment", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ productCode }) });
-      const result = await response.json(); if (!response.ok || !result.paymentUrl) throw new Error(result.error || "PAYMENT_REQUEST_FAILED");
-      window.location.assign(result.paymentUrl);
-    } catch (error) { const message=error instanceof Error?error.message:"PAYMENT_REQUEST_FAILED"; setPurchaseError(message === "PRODUCT_NOT_FOUND" ? "该额度包暂不可购买。" : "无法创建支付订单，请检查沙箱配置后重试。"); setPurchaseBusy(""); }
+    const storeLinks: Record<string, string> = {
+      "points-50": "https://pay.ldxp.cn/item/1pqkii",
+      "points-250": "https://pay.ldxp.cn/item/spnibv",
+      "points-500": "https://pay.ldxp.cn/item/qm0lq5",
+      "pro-month": "https://pay.ldxp.cn/item/ic6935",
+    };
+    const storeLink = storeLinks[productCode];
+    if (!storeLink) { setPurchaseError("该权益暂不可购买。"); return; }
+    window.open(storeLink, "_blank", "noopener,noreferrer");
+    window.location.assign("/redeem");
   }
   useEffect(() => {
     const close = (event: KeyboardEvent) => {
