@@ -1,5 +1,5 @@
 import { corsHeaders, preflight } from "../_shared/cors.ts";
-import { admin, body, json, rateLimit, refund_credits, user } from "../_shared/core.ts";
+import { admin, body, json, rateLimit, refund, user } from "../_shared/core.ts";
 
 type Action = "outline" | "content" | "status" | "download";
 
@@ -57,7 +57,7 @@ Deno.serve(async (req) => {
     });
     if (!upstream.ok) {
       const detail = clean(await upstream.text(), 500);
-      if (startsPptTask) await refund_credits(billingRequestId, `APILIO_PPT_${upstream.status}`);
+      if (startsPptTask) await refund(billingRequestId, `APILIO_PPT_${upstream.status}`);
       throw new Error(`APILIO_PPT_${upstream.status}${detail ? `:${detail}` : ""}`);
     }
     if (stream && upstream.body) return new Response(upstream.body, { headers: { ...corsHeaders, "Content-Type": "text/event-stream", "Cache-Control": "no-cache" } });
