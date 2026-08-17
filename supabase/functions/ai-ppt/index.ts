@@ -1,7 +1,7 @@
 import { corsHeaders, preflight } from "../_shared/cors.ts";
 import { body, json, rateLimit, user } from "../_shared/core.ts";
 
-type Action = "direct" | "outline" | "content" | "markdown" | "status";
+type Action = "direct" | "outline" | "content" | "markdown" | "status" | "download";
 
 const paths: Record<Action, string> = {
   // Apilio aggregates DocMee-compatible routes under the same API base and key
@@ -12,6 +12,7 @@ const paths: Record<Action, string> = {
   content: "/docmee/v1/api/ppt/generateContent",
   markdown: Deno.env.get("DOCMEE_GENERATE_PPTX_PATH") || "/docmee/v1/api/ppt/generatePptx",
   status: "/docmee/v1/api/ppt/asyncPptInfo",
+  download: "/docmee/v1/api/ppt/downloadPptx",
 };
 
 function clean(value: unknown, limit: number) {
@@ -34,6 +35,7 @@ function upstreamRequest(action: Action, request: Record<string, unknown>) {
   if (action === "outline" || action === "direct") return { subject: clean(request.subject, 60000) };
   if (action === "content") return { outlineMarkdown: clean(request.outlineMarkdown, 100000), asyncGenPptx: Boolean(request.asyncGenPptx) };
   if (action === "markdown") return { markdown: clean(request.markdown, 100000) };
+  if (action === "download") return { id: clean(request.id, 300) };
   return request;
 }
 
