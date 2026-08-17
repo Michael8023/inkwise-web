@@ -1,0 +1,2 @@
+.admin-nav .admin-nav-link { width: 100%; display: flex; align-items: center; gap: 9px; border-radius: 6px; color: #87938f; padding: 10px 11px; font-size: 13px; text-decoration: none; }
+.admin-nav .admin-nav-link:hover { background: rgb(61 157 125 / .1); color: #6dc2a4; }
