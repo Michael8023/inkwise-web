@@ -32,12 +32,17 @@ async function upstreamModels(): Promise<RemoteModel[]> {
 async function upstreamBalance() {
   const configuredBase = (env("APILIO_BASE_URL") || "https://api.apilio.ai/v1").replace(/\/$/, "");
   const baseUrl = configuredBase.replace(/\/v1$/, "");
-  const response = await fetch(`${baseUrl}/api/usage/token`, { headers: { Authorization: `Bearer ${env("APILIO_API_KEY")}`, Accept: "application/json" } });
+  const systemToken = Deno.env.get("APILIO_SYSTEM_TOKEN");
+  const userId = Deno.env.get("APILIO_USER_ID");
+  if (!systemToken || !userId) throw new Error("APILIO_BALANCE_NOT_CONFIGURED");
+  const response = await fetch(`${baseUrl}/api/user/self`, { headers: { Authorization: `Bearer ${systemToken}`, "New-API-User": userId, Accept: "application/json" } });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || !payload?.data) throw new Error("UPSTREAM_BALANCE_FAILED");
   const data = payload.data;
   const numeric = (value: unknown) => Number.isFinite(Number(value)) ? Number(value) : 0;
-  return { name: String(data.name || "Apilio API"), totalGranted: numeric(data.total_granted), totalUsed: numeric(data.total_used), totalAvailable: numeric(data.total_available), unlimited: data.unlimited_quota === true, expiresAt: numeric(data.expires_at) || null };
+  const totalAvailable = numeric(data.quota);
+  const totalUsed = numeric(data.used_quota);
+  return { name: String(data.display_name || data.username || "Apilio"), totalGranted: totalAvailable + totalUsed, totalUsed, totalAvailable, unlimited: false, expiresAt: null };
 }
 
 async function requireAdmin(req: Request) {
@@ -60,6 +65,7 @@ function statusFor(message: string) {
   if (message === "INVALID_REFERRAL_BONUS") return 400;
   if (message === "UPSTREAM_MODELS_FAILED") return 502;
   if (message === "UPSTREAM_BALANCE_FAILED") return 502;
+  if (message === "APILIO_BALANCE_NOT_CONFIGURED") return 503;
   return 400;
 }
 

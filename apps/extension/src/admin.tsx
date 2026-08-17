@@ -30,6 +30,7 @@ const errors: Record<string, string> = {
   DEFAULT_PLAN_REQUIRED: "请先将其他套餐设为新用户默认套餐。",
   INVALID_MODELS: "请至少选择一个有效模型。",
   UPSTREAM_MODELS_FAILED: "无法读取模型服务列表，请稍后刷新重试。",
+  APILIO_BALANCE_NOT_CONFIGURED: "尚未配置 Apilio 系统令牌或用户 ID。",
   UPSTREAM_BALANCE_FAILED: "无法读取 Apilio 上游余额，请稍后重试。",
   NETWORK_REQUEST_FAILED: "请求未能到达后台。请确认 Edge Function 已部署，并检查网络或跨域配置。",
   PASSWORD_INVALID: "密码长度需为 8 至 72 位。",
