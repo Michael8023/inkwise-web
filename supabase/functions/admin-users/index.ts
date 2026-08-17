@@ -46,6 +46,7 @@ function statusFor(message: string) {
   if (message === "PLAN_NOT_FOUND") return 404;
   if (message === "PLAN_NAME_EXISTS") return 409;
   if (message === "PASSWORD_INVALID") return 400;
+  if (message === "INVALID_REFERRAL_BONUS") return 400;
   if (message === "UPSTREAM_MODELS_FAILED") return 502;
   return 400;
 }
@@ -57,6 +58,18 @@ Deno.serve(async req => {
     const { currentUser, db } = await requireAdmin(req);
     if (req.method === "GET") {
       const url = new URL(req.url);
+      if (url.searchParams.get("feedback") === "1") {
+        const page = Math.max(1, Number(url.searchParams.get("page") || 1));
+        const limit = 40;
+        const { data, error } = await db.from("user_feedback")
+          .select("id,user_id,category,content,status,created_at")
+          .order("status").order("created_at", { ascending: false }).range((page - 1) * limit, page * limit - 1);
+        if (error) throw error;
+        const userIds = [...new Set((data || []).map(item => item.user_id))];
+        const users = await Promise.all(userIds.map(id => db.auth.admin.getUserById(id)));
+        const emails = new Map(users.map(result => [result.data.user?.id, result.data.user?.email || "-"]));
+        return json({ feedback: (data || []).map(item => ({ ...item, email: emails.get(item.user_id) || "-" })), page });
+      }
       if (url.searchParams.get("models") === "catalog") {
         const [remote, { data: catalog, error: catalogError }] = await Promise.all([
           upstreamModels(),
@@ -80,18 +93,21 @@ Deno.serve(async req => {
       const search = (url.searchParams.get("search") || "").slice(0, 100);
       const page = Math.max(1, Number(url.searchParams.get("page") || 1));
       const limit = 30;
-      const [{ data: users, error: usersError }, { data: plans, error: plansError }] = await Promise.all([
+      const [{ data: users, error: usersError }, { data: plans, error: plansError }, { data: referralSettings, error: referralSettingsError }] = await Promise.all([
         db.rpc("admin_list_users", { p_search: search, p_limit: limit, p_offset: (page - 1) * limit }),
         db.from("plans").select("id,name,monthly_credits,is_default").order("monthly_credits"),
+        db.from("referral_settings").select("signup_bonus").eq("id", true).maybeSingle(),
       ]);
       if (usersError) throw usersError;
       if (plansError) throw plansError;
+      if (referralSettingsError) throw referralSettingsError;
       return json({
         users: users || [],
         plans: plans || [],
         page,
         pageSize: limit,
         total: Number(users?.[0]?.total_count || 0),
+        referralBonus: Number(referralSettings?.signup_bonus || 0),
       });
     }
     if (req.method === "POST") {
@@ -107,6 +123,20 @@ Deno.serve(async req => {
         const { error: updateError } = await db.auth.admin.updateUserById(userId, { password });
         if (updateError) throw new Error("PASSWORD_RESET_FAILED");
         return json({ ok: true, userId });
+      }
+      if (input.action === "saveReferralBonus") {
+        const signupBonus = Number(input.signupBonus);
+        if (!Number.isSafeInteger(signupBonus) || signupBonus < 0 || signupBonus > 10_000_000) throw new Error("INVALID_REFERRAL_BONUS");
+        const { error } = await db.from("referral_settings").upsert({ id: true, signup_bonus: signupBonus, updated_at: new Date().toISOString() });
+        if (error) throw error;
+        return json({ ok: true, signupBonus });
+      }
+      if (input.action === "setFeedbackStatus") {
+        const feedbackId = String(input.feedbackId || ""); const status = String(input.status || "");
+        if (!/^[0-9a-f-]{36}$/i.test(feedbackId) || !["todo", "done"].includes(status)) throw new Error("INVALID_FEEDBACK");
+        const { error } = await db.from("user_feedback").update({ status, updated_at: new Date().toISOString() }).eq("id", feedbackId);
+        if (error) throw error;
+        return json({ ok: true });
       }
       if (input.action === "saveModels") {
         const models = Array.isArray(input.models) ? input.models : [];
@@ -176,6 +206,13 @@ Deno.serve(async req => {
     }
     if (req.method === "DELETE") {
       const input = await body(req);
+      if (input.action === "deleteFeedback") {
+        const feedbackId = String(input.feedbackId || "");
+        if (!/^[0-9a-f-]{36}$/i.test(feedbackId)) throw new Error("INVALID_FEEDBACK");
+        const { error } = await db.from("user_feedback").delete().eq("id", feedbackId);
+        if (error) throw error;
+        return json({ ok: true });
+      }
       const userId = String(input.userId || "");
       const confirmation = String(input.confirmation || "").trim().toLowerCase();
       if (!/^[0-9a-f-]{36}$/i.test(userId)) throw new Error("USER_NOT_FOUND");

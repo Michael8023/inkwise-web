@@ -3,11 +3,11 @@ import { createRoot } from "react-dom/client";
 import ReactMarkdown from "react-markdown";
 import * as pdfjsLib from "pdfjs-dist";
 import JSZip from "jszip";
-import * as THREE from "three";
 import { functionRequest, supabase, supabaseConfigured } from "./api";
 import { LibraryScreen, type LibraryPaper, loadPaperState } from "./library";
 import {
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   Check,
   Copy,
@@ -387,6 +387,7 @@ const apiErrors: Record<string, string> = {
   USERNAME_INVALID: "用户名需为 3 至 24 个字符，只能包含文字、数字、下划线或短横线。",
   USERNAME_TAKEN: "该用户名已被使用。",
   EMAIL_ALREADY_REGISTERED: "该邮箱已注册，请直接登录。",
+  INVITE_CODE_INVALID: "邀请码不存在或格式不正确。",
   CODE_COOLDOWN: "发送过于频繁，请一分钟后重试。",
   CODE_RATE_LIMITED: "验证码请求次数过多，请一小时后重试。",
   CODE_INVALID: "验证码不正确。",
@@ -449,12 +450,12 @@ function librarySaveError(error: unknown, stage: "检查重复" | "上传 PDF" |
 }
 
 function AuthDialog({
-  mode, email, password, passwordConfirm, name, code, error, notice, verifying, resetting, resetVerifying, busy, busyLabel, onClose, onSubmit, onVerify, onResend, onResetRequest, onResetVerify, onResetResend, onOpenReset, onBackToLogin, onModeChange, onEmail, onPassword, onPasswordConfirm, onName, onCode,
+  mode, email, password, passwordConfirm, name, inviteCode, code, error, notice, verifying, resetting, resetVerifying, busy, busyLabel, onClose, onSubmit, onVerify, onResend, onResetRequest, onResetVerify, onResetResend, onOpenReset, onBackToLogin, onModeChange, onEmail, onPassword, onPasswordConfirm, onName, onInviteCode, onCode,
 }: {
-  mode: "login" | "register"; email: string; password: string; passwordConfirm: string; name: string; code: string; error: string; notice: string; verifying: boolean; resetting: boolean; resetVerifying: boolean;
+  mode: "login" | "register"; email: string; password: string; passwordConfirm: string; name: string; inviteCode: string; code: string; error: string; notice: string; verifying: boolean; resetting: boolean; resetVerifying: boolean;
   busy: boolean; busyLabel: string;
   onClose: () => void; onSubmit: () => void; onVerify: () => void; onResend: () => void; onResetRequest: () => void; onResetVerify: () => void; onResetResend: () => void; onOpenReset: () => void; onBackToLogin: () => void; onModeChange: (mode: "login" | "register") => void;
-  onEmail: (value: string) => void; onPassword: (value: string) => void; onPasswordConfirm: (value: string) => void; onName: (value: string) => void; onCode: (value: string) => void;
+  onEmail: (value: string) => void; onPassword: (value: string) => void; onPasswordConfirm: (value: string) => void; onName: (value: string) => void; onInviteCode: (value: string) => void; onCode: (value: string) => void;
 }) {
   const verifyingReset = resetting && resetVerifying;
   const title = verifying ? "验证你的邮箱" : verifyingReset ? "设置新密码" : resetting ? "重设密码" : mode === "login" ? "欢迎回来" : "创建你的阅读空间";
@@ -466,13 +467,14 @@ function AuthDialog({
       {mode === "register" && <label>用户名<input disabled={busy} placeholder="至少 3 个字符" required minLength={3} value={name} onChange={(event) => onName(event.target.value)} /></label>}
       <label>邮箱<input disabled={busy} type="email" placeholder="name@example.com" required autoComplete="email" value={email} onChange={(event) => onEmail(event.target.value)} /></label>
       <label>密码<input disabled={busy} type="password" placeholder="至少 8 位" required minLength={8} autoComplete={mode === "login" ? "current-password" : "new-password"} value={password} onChange={(event) => onPassword(event.target.value)} /></label>
+      {mode === "register" && <label>邀请码 <small>可选，填写后注册奖励由后台配置</small><input disabled={busy} placeholder="例如 SD1234AB" maxLength={32} value={inviteCode} onChange={(event) => onInviteCode(event.target.value.toUpperCase())} /></label>}
     </div>{mode === "login" && <button type="button" className="auth-forgot-password" onClick={onOpenReset} disabled={busy}>忘记密码？</button>}</>}
     {error && <p className="auth-feedback error">{error}</p>}{notice && <p className="auth-feedback auth-notice">{notice}</p>}
     <button className="auth-submit" type="submit" disabled={busy}>{busy ? <><RefreshCw className="auth-spinner" size={17} />{busyLabel}</> : <>{verifying ? "完成验证" : verifyingReset ? "确认重设密码" : resetting ? "发送验证码" : mode === "login" ? "登录识谛" : "发送验证码"}<ChevronRight size={17} /></>}</button>
   </form></div>;
 }
 
-function AccountDialog({ session, usage, onClose, onSignOut, onOpenLibrary }: { session: AuthSession; usage: Usage | null; onClose: () => void; onSignOut: () => void; onOpenLibrary: () => void }) {
+function AccountDialog({ session, usage, inviteCode, onClose, onSignOut, onOpenLibrary, onOpenFeedback }: { session: AuthSession; usage: Usage | null; inviteCode: string; onClose: () => void; onSignOut: () => void; onOpenLibrary: () => void; onOpenFeedback: () => void }) {
   const displayName = String(session.user.user_metadata?.display_name || session.user.user_metadata?.username || "识谛用户");
   const initial = displayName.trim().slice(0, 1).toUpperCase() || "I";
   const creditAmount = usage?.creditsRemaining ?? 0;
@@ -482,9 +484,22 @@ function AccountDialog({ session, usage, onClose, onSignOut, onOpenLibrary }: { 
     <div className="account-hero"><div className="account-avatar">{initial}</div><div><p>账户中心</p><h2>{displayName}</h2><span>{session.user.email}</span></div></div>
     <section className="account-credits"><div><span>可用 AI 额度</span><strong>{creditAmount}<small> 分</small></strong></div><div className="credit-orbit"><Sparkles size={19} /></div></section>
     <div className="quota-summary"><span>当前套餐<strong>{usage?.plan ? usage.plan.toUpperCase() : "FREE"}</strong></span><span>结算日期<strong>{usage?.periodEnd ? new Date(usage.periodEnd).toLocaleDateString("zh-CN", { month: "short", day: "numeric" }) : "每月"}</strong></span></div>
+    <section className="account-invite"><span>我的邀请码</span><strong>{inviteCode || "正在生成…"}</strong><small>好友注册时填写，即可获得后台设置的新人奖励。</small></section>
     <button type="button" className="account-library" onClick={onOpenLibrary}><span className="account-library-icon"><FolderOpen size={22}/></span><span className="account-library-copy"><small>个人文献工作台</small><strong>整理每一篇重要文献</strong><em>查看文献库、继续阅读与管理资料</em></span><ChevronRight size={19} /></button>
+    <button type="button" className="account-feedback" onClick={onOpenFeedback}><MessageSquare size={16}/><span><small>共创识谛</small><strong>提交反馈与建议</strong></span><ChevronRight size={17}/></button>
     <button type="button" className="account-signout" onClick={onSignOut}><LogOut size={15} />退出登录</button>
   </section></div>;
+}
+
+function FeedbackScreen({ session, onBack }: { session: AuthSession; onBack: () => void }) {
+  const [category, setCategory] = useState("suggestion"); const [content, setContent] = useState(""); const [saving, setSaving] = useState(false); const [message, setMessage] = useState("");
+  async function submit(event: React.FormEvent) {
+    event.preventDefault(); setSaving(true); setMessage("");
+    const { error } = await supabase.from("user_feedback").insert({ user_id: session.user.id, category, content: content.trim() });
+    if (error) setMessage("提交失败，请稍后再试。"); else { setContent(""); setMessage("已收到。谢谢你愿意和我们一起，让识谛更好一点。 "); }
+    setSaving(false);
+  }
+  return <main className="feedback-page"><header><button onClick={onBack}><ChevronLeft size={17}/>返回</button><div className="feedback-brand"><img src="/brand/shidea-mark.png" alt="" />识谛 <em>shidea</em></div></header><section className="feedback-card"><p>SHIDEA / CO-CREATION</p><h1>每一条反馈，<br/>都在帮我们把识谛做得更好。</h1><div className="feedback-copy"><span>你好，{String(session.user.user_metadata?.display_name || session.user.user_metadata?.username || "阅读者")}。</span><span>我们仍在学习如何让阅读更安静、更清晰。无论是一个困扰、一个遗漏，还是一点灵感，都很珍贵。谢谢你愿意把它交给我们。</span></div><form onSubmit={submit}><label>反馈类型<select value={category} onChange={event => setCategory(event.target.value)}><option value="suggestion">功能建议</option><option value="bug">问题反馈</option><option value="other">其他想法</option></select></label><label>想和我们说些什么？<textarea required minLength={5} maxLength={2000} value={content} onChange={event => setContent(event.target.value)} placeholder="请尽量描述使用场景，这会帮助我们更好地理解你。" /></label>{message && <p className="feedback-message">{message}</p>}<button disabled={saving}>{saving ? "正在认真收下…" : "提交这条反馈"}<ChevronRight size={17}/></button></form></section></main>;
 }
 
 function UrlImportDialog({ value, error, loading, onChange, onClose, onSubmit }: { value: string; error: string; loading: boolean; onChange: (value: string) => void; onClose: () => void; onSubmit: () => void }) {
@@ -624,6 +639,8 @@ function PdfStartupLoading() {
 
 /** A self-running 3D transition inspired by the supplied mail-delivery scene.
  * The incoming PDF replaces the letter; the destination is shidea's reader. */
+/* Removed mail-delivery transition. Kept temporarily as commented source to
+ * avoid loading it into the reader bundle.
 function SpaceReaderLoadingScene() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -761,6 +778,7 @@ function SpaceReaderLoadingScene() {
   return <canvas ref={canvasRef} className="document-loading-canvas" aria-hidden="true" />;
 }
 
+*/
 function OutlineTree({
   items,
   depth = 0,
@@ -1430,6 +1448,7 @@ function App() {
   const [currentPaperId, setCurrentPaperId] = useState("");
   const [paperStateLoaded, setPaperStateLoaded] = useState(true);
   const [libraryOpen, setLibraryOpen] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [notices, setNotices] = useState<AppNotice[]>([]);
   const [usage, setUsage] = useState<Usage | null>(null);
   const [authOpen, setAuthOpen] = useState(false);
@@ -1438,6 +1457,8 @@ function App() {
   const [authPassword, setAuthPassword] = useState("");
   const [authPasswordConfirm, setAuthPasswordConfirm] = useState("");
   const [authName, setAuthName] = useState("");
+  const [authInviteCode, setAuthInviteCode] = useState("");
+  const [inviteCode, setInviteCode] = useState("");
   const [authNotice, setAuthNotice] = useState("");
   const [authError, setAuthError] = useState("");
   const [authCode, setAuthCode] = useState("");
@@ -1527,6 +1548,9 @@ function App() {
       if (next) {
         if (closeDialog) setAuthOpen(false);
         void refreshUsage();
+        void supabase.from("profiles").select("invite_code").eq("id", next.user.id).maybeSingle().then(({ data }) => setInviteCode(data?.invite_code || ""));
+      } else {
+        setInviteCode("");
       }
     };
     supabase.auth.getSession().then(({ data }) => applySession(data.session as AuthSession | null));
@@ -1605,10 +1629,8 @@ function App() {
   }, [nativePdfView, session, documentReady, documentId, paperStateLoaded, mineruReady]);
   useEffect(() => {
     if (!pdf) return;
-    // Let the ink bloom complete before removing the transition layer. This
-    // keeps the PDF hidden until the full-screen wash has faded into it, but
-    // does not wait for large documents to finish full-text extraction.
-    const timer = window.setTimeout(() => setPdfOpening(false), 3050);
+    // Open the reader as soon as PDF.js has finished loading it.
+    const timer = window.setTimeout(() => setPdfOpening(false), 0);
     return () => window.clearTimeout(timer);
   }, [pdf]);
   useEffect(() => {
@@ -1788,7 +1810,7 @@ function App() {
         const response = await functionRequest("request-signup-code", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email: authEmail, username: authName }),
+          body: JSON.stringify({ email: authEmail, username: authName, inviteCode: authInviteCode }),
         });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || "EMAIL_SEND_FAILED");
@@ -1841,7 +1863,7 @@ function App() {
       const response = await functionRequest("request-signup-code", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: authEmail, username: authName }),
+        body: JSON.stringify({ email: authEmail, username: authName, inviteCode: authInviteCode }),
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "EMAIL_SEND_FAILED");
@@ -2440,6 +2462,8 @@ function App() {
     goToPage(pageIndex + 1);
   }
 
+  if (feedbackOpen && session) return <FeedbackScreen session={session} onBack={() => setFeedbackOpen(false)} />;
+
   if (libraryOpen && session) return <LibraryScreen
     canReturn={Boolean(pdf)}
     onClose={() => setLibraryOpen(false)}
@@ -2471,7 +2495,7 @@ function App() {
           onOpenLibrary={() => session ? setLibraryOpen(true) : setAuthOpen(true)}
         />
         <input ref={fileInput} className="welcome-file-input" type="file" accept="application/pdf" onChange={(event) => event.target.files?.[0] && openFile(event.target.files[0])} />
-        {authOpen && (session ? <AccountDialog session={session} usage={usage} onClose={() => setAuthOpen(false)} onSignOut={() => { signOut(); setAuthOpen(false); }} onOpenLibrary={() => { setAuthOpen(false); setLibraryOpen(true); }} /> : <AuthDialog mode={authMode} email={authEmail} password={authPassword} passwordConfirm={authPasswordConfirm} name={authName} code={authCode} error={authError} notice={authNotice} verifying={authVerifying} resetting={authResetting} resetVerifying={authResetVerifying} busy={authBusy} busyLabel={authBusyLabel} onClose={() => setAuthOpen(false)} onSubmit={submitAuth} onVerify={verifyEmailCode} onResend={resendEmailCode} onResetRequest={requestPasswordReset} onResetVerify={resetPassword} onResetResend={requestPasswordReset} onOpenReset={beginPasswordReset} onBackToLogin={backToLogin} onModeChange={(nextMode) => { setAuthMode(nextMode); setAuthVerifying(false); setAuthResetting(false); setAuthResetVerifying(false); setAuthError(""); setAuthNotice(""); }} onEmail={setAuthEmail} onPassword={setAuthPassword} onPasswordConfirm={setAuthPasswordConfirm} onName={setAuthName} onCode={setAuthCode} />)}
+        {authOpen && (session ? <AccountDialog session={session} usage={usage} inviteCode={inviteCode} onClose={() => setAuthOpen(false)} onSignOut={() => { signOut(); setAuthOpen(false); }} onOpenLibrary={() => { setAuthOpen(false); setLibraryOpen(true); }} onOpenFeedback={() => { setAuthOpen(false); setFeedbackOpen(true); }} /> : <AuthDialog mode={authMode} email={authEmail} password={authPassword} passwordConfirm={authPasswordConfirm} name={authName} inviteCode={authInviteCode} code={authCode} error={authError} notice={authNotice} verifying={authVerifying} resetting={authResetting} resetVerifying={authResetVerifying} busy={authBusy} busyLabel={authBusyLabel} onClose={() => setAuthOpen(false)} onSubmit={submitAuth} onVerify={verifyEmailCode} onResend={resendEmailCode} onResetRequest={requestPasswordReset} onResetVerify={resetPassword} onResetResend={requestPasswordReset} onOpenReset={beginPasswordReset} onBackToLogin={backToLogin} onModeChange={(nextMode) => { setAuthMode(nextMode); setAuthVerifying(false); setAuthResetting(false); setAuthResetVerifying(false); setAuthError(""); setAuthNotice(""); }} onEmail={setAuthEmail} onPassword={setAuthPassword} onPasswordConfirm={setAuthPasswordConfirm} onName={setAuthName} onInviteCode={setAuthInviteCode} onCode={setAuthCode} />)}
         {urlOpen && <UrlImportDialog value={paperUrl} error={urlError} loading={urlLoading} onChange={value => { setPaperUrl(value); setUrlError(""); }} onClose={() => setUrlOpen(false)} onSubmit={openPdfUrl} />}
         {!embeddedReader && <ExtensionAutoOpenToggle />}
       </div>
@@ -2521,10 +2545,6 @@ function App() {
 
   return (
     <div className={`app quiet-reading${nativePdfView ? " native-pdf-mode" : ""}`}>
-      {pdfOpening && <div className="ink-opening document-loading" role="status" aria-label="正在将 PDF 放入阅读器">
-        <SpaceReaderLoadingScene />
-    <div className="ink-opening-wordmark"><img src="/brand/shidea-mark.png" alt="" /><span>识谛</span><small>正在为你展开阅读空间</small></div>
-      </div>}
       <header className="topbar">
         <div className="topbar-left">
           <IconButton
@@ -2840,7 +2860,7 @@ function App() {
         </aside>
       </main>
       <NoticeStack notices={notices} onDismiss={dismissNotice}/>
-      {authOpen && (session ? <AccountDialog session={session} usage={usage} onClose={() => setAuthOpen(false)} onSignOut={() => { signOut(); setAuthOpen(false); }} onOpenLibrary={() => { setAuthOpen(false); setLibraryOpen(true); }} /> : <AuthDialog mode={authMode} email={authEmail} password={authPassword} passwordConfirm={authPasswordConfirm} name={authName} code={authCode} error={authError} notice={authNotice} verifying={authVerifying} resetting={authResetting} resetVerifying={authResetVerifying} busy={authBusy} busyLabel={authBusyLabel} onClose={() => setAuthOpen(false)} onSubmit={submitAuth} onVerify={verifyEmailCode} onResend={resendEmailCode} onResetRequest={requestPasswordReset} onResetVerify={resetPassword} onResetResend={requestPasswordReset} onOpenReset={beginPasswordReset} onBackToLogin={backToLogin} onModeChange={(nextMode) => { setAuthMode(nextMode); setAuthVerifying(false); setAuthResetting(false); setAuthResetVerifying(false); setAuthError(""); setAuthNotice(""); }} onEmail={setAuthEmail} onPassword={setAuthPassword} onPasswordConfirm={setAuthPasswordConfirm} onName={setAuthName} onCode={setAuthCode} />)}
+      {authOpen && (session ? <AccountDialog session={session} usage={usage} inviteCode={inviteCode} onClose={() => setAuthOpen(false)} onSignOut={() => { signOut(); setAuthOpen(false); }} onOpenLibrary={() => { setAuthOpen(false); setLibraryOpen(true); }} onOpenFeedback={() => { setAuthOpen(false); setFeedbackOpen(true); }} /> : <AuthDialog mode={authMode} email={authEmail} password={authPassword} passwordConfirm={authPasswordConfirm} name={authName} inviteCode={authInviteCode} code={authCode} error={authError} notice={authNotice} verifying={authVerifying} resetting={authResetting} resetVerifying={authResetVerifying} busy={authBusy} busyLabel={authBusyLabel} onClose={() => setAuthOpen(false)} onSubmit={submitAuth} onVerify={verifyEmailCode} onResend={resendEmailCode} onResetRequest={requestPasswordReset} onResetVerify={resetPassword} onResetResend={requestPasswordReset} onOpenReset={beginPasswordReset} onBackToLogin={backToLogin} onModeChange={(nextMode) => { setAuthMode(nextMode); setAuthVerifying(false); setAuthResetting(false); setAuthResetting(false); setAuthResetVerifying(false); setAuthError(""); setAuthNotice(""); }} onEmail={setAuthEmail} onPassword={setAuthPassword} onPasswordConfirm={setAuthPasswordConfirm} onName={setAuthName} onInviteCode={setAuthInviteCode} onCode={setAuthCode} />)}
       {urlOpen && <UrlImportDialog value={paperUrl} error={urlError} loading={urlLoading} onChange={value => { setPaperUrl(value); setUrlError(""); }} onClose={() => setUrlOpen(false)} onSubmit={openPdfUrl} />}
       {!embeddedReader && <ExtensionAutoOpenToggle />}
     </div>

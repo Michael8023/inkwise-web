@@ -21,6 +21,8 @@ Deno.serve(async req => {
     const input = await body(req);
     const email = normalizeEmail(input.email);
     const username = normalizeUsername(input.username);
+    const inviteCode = String(input.inviteCode || "").trim().toUpperCase();
+    if (inviteCode && !/^[A-Z0-9_-]{4,32}$/.test(inviteCode)) throw new Error("INVITE_CODE_INVALID");
     const db = admin();
 
     const { data: profile, error: profileError } = await db
@@ -30,13 +32,18 @@ Deno.serve(async req => {
       .maybeSingle();
     if (profileError) throw profileError;
     if (profile) throw new Error("USERNAME_TAKEN");
+    if (inviteCode) {
+      const { data: inviterId, error: inviterError } = await db.rpc("find_inviter_by_code", { p_invite_code: inviteCode });
+      if (inviterError) throw inviterError;
+      if (!inviterId) throw new Error("INVITE_CODE_INVALID");
+    }
 
     const code = crypto.getRandomValues(new Uint32Array(1))[0] % 1_000_000;
     const printableCode = code.toString().padStart(6, "0");
     const codeHash = await hashSignupCode(email, printableCode);
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
     const { data: issued, error: issueError } = await db.rpc("issue_signup_code", {
-      p_email: email, p_username: username, p_code_hash: codeHash, p_expires_at: expiresAt,
+      p_email: email, p_username: username, p_code_hash: codeHash, p_expires_at: expiresAt, p_invite_code: inviteCode || null,
     });
     if (issueError) throw issueError;
     if (!issued?.ok) throw new Error(issued?.error || "CODE_SEND_FAILED");

@@ -34,6 +34,11 @@ Deno.serve(async req => {
       if (!duplicate) await db.rpc("release_signup_code", { p_email: email });
       throw new Error(duplicate ? "EMAIL_ALREADY_REGISTERED" : "SIGNUP_FAILED");
     }
+    const inviteCode = typeof claimed.invite_code === "string" ? claimed.invite_code : "";
+    if (inviteCode) {
+      const { data: referral, error: referralError } = await db.rpc("apply_signup_referral", { p_referred_user_id: data.user.id, p_invite_code: inviteCode });
+      if (referralError || !referral?.ok) console.error("Signup referral was not applied", referralError?.message || referral);
+    }
     return json({ ok: true, userId: data.user.id });
   } catch (error) {
     const message = error instanceof Error ? error.message : "SIGNUP_FAILED";
