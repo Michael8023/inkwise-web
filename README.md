@@ -22,6 +22,10 @@
 
 每次执行 `npm --workspace apps/extension run package:edge` 会重新打包插件，并将最新 ZIP 同步到官网静态下载路径；`npm --workspace apps/extension run deploy` 会先完成该同步再部署。
 
+## 卡密兑换
+
+管理员登录后打开 `https://www.inkwise.site/admin/codes`，选择积分包或 Pro 月卡、生成批量兑换码并下载 TXT；将该 TXT 导入发卡平台。用户登录后可在 `https://www.inkwise.site/redeem` 输入卡密兑换。服务器只保存兑换码哈希，卡密仅能兑换一次。
+
 ## 论文导入功能
 
 识谛支持通过 DOI 号自动获取论文 PDF，系统会按以下顺序尝试：

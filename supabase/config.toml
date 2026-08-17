@@ -28,6 +28,8 @@ verify_jwt = false
 verify_jwt = true
 [functions.alipay-notify]
 verify_jwt = false
+[functions.redemption-codes]
+verify_jwt = true
 [functions.admin-users]
 verify_jwt = true
 [functions.ai-visual]
