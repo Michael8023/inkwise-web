@@ -1986,11 +1986,16 @@ body.is-resizing-panel * {
 .docmee-confirm span { display: flex; gap: 7px; }
 .docmee-confirm svg { flex: 0 0 auto; color: #158477; margin-top: 1px; }
 .docmee-review .docmee-launch { grid-column: 1 / -1; min-height: 54px; font-size: 14px; }
-.docmee-container { display: none; min-height: 760px; overflow: hidden; border: 1px solid #d7e7e5; border-radius: 14px; background: #f6fbfc; box-shadow: 0 8px 22px rgb(6 52 119 / .05); }
-.docmee-container.visible { display: block; }
-.docmee-container iframe { display: block; min-height: 760px; border: 0; }
+.docmee-templates { grid-column: 1 / -1; margin: 0; border: 0; padding: 0; }
+.docmee-templates legend { margin-bottom: 9px; color: #315668; font-size: 13px; font-weight: 700; }
+.docmee-templates > div { display: grid; grid-template-columns: repeat(auto-fill, minmax(145px, 1fr)); gap: 10px; }
+.docmee-templates button { display: grid; grid-template-rows: 90px auto; overflow: hidden; border: 1px solid #d6e7e6; border-radius: 10px; background: #fff; color: #315668; padding: 0; text-align: left; cursor: pointer; }
+.docmee-templates button.selected { border-color: #078b8e; box-shadow: 0 0 0 2px rgb(7 139 142 / .16); }
+.docmee-templates img { width: 100%; height: 90px; object-fit: cover; background: #f0f7f7; }
+.docmee-templates svg { width: 100%; height: 90px; padding: 30px 0; background: #f0f7f7; color: #078b8e; box-sizing: border-box; }
+.docmee-templates span { overflow: hidden; padding: 8px 9px; font-size: 11px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
 .docmee-tip { display: flex; align-items: center; gap: 7px; margin: 0; color: #607b86; font-size: 12px; line-height: 1.6; }
-@media (max-width: 760px) { .docmee-review { grid-template-columns: 1fr; padding: 16px; }.docmee-evidence textarea { min-height: 220px; }.docmee-container,.docmee-container iframe { min-height: 680px; } }
+@media (max-width: 760px) { .docmee-review { grid-template-columns: 1fr; padding: 16px; }.docmee-evidence textarea { min-height: 220px; } }
 
 /* Explicit placement prevents inherited responsive rules from shrinking the
    modes and primary action into a single column. */
