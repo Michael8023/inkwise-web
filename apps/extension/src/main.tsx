@@ -395,6 +395,8 @@ const apiErrors: Record<string, string> = {
   CODE_ATTEMPTS_EXCEEDED: "错误次数过多，请重新获取验证码。",
   EMAIL_SEND_FAILED: "验证邮件发送失败，请稍后重试。",
   PASSWORD_INVALID: "密码长度需为 8 至 72 位。",
+  PASSWORD_MISMATCH: "两次输入的密码不一致。",
+  PASSWORD_RESET_FAILED: "密码重设失败，请稍后重试。",
   IMAGE_INVALID: "框选图像无效或过大，请缩小区域后重试。",
   MODEL_VISION_UNSUPPORTED: "当前模型不支持图像理解，请切换其他模型。",
   AI_VISUAL_FAILED: "图表识别失败，请稍后重试。",
@@ -447,24 +449,26 @@ function librarySaveError(error: unknown, stage: "检查重复" | "上传 PDF" |
 }
 
 function AuthDialog({
-  mode, email, password, name, code, error, notice, verifying, busy, busyLabel, onClose, onSubmit, onVerify, onResend, onModeChange, onEmail, onPassword, onName, onCode,
+  mode, email, password, passwordConfirm, name, code, error, notice, verifying, resetting, resetVerifying, busy, busyLabel, onClose, onSubmit, onVerify, onResend, onResetRequest, onResetVerify, onResetResend, onOpenReset, onBackToLogin, onModeChange, onEmail, onPassword, onPasswordConfirm, onName, onCode,
 }: {
-  mode: "login" | "register"; email: string; password: string; name: string; code: string; error: string; notice: string; verifying: boolean;
+  mode: "login" | "register"; email: string; password: string; passwordConfirm: string; name: string; code: string; error: string; notice: string; verifying: boolean; resetting: boolean; resetVerifying: boolean;
   busy: boolean; busyLabel: string;
-  onClose: () => void; onSubmit: () => void; onVerify: () => void; onResend: () => void; onModeChange: (mode: "login" | "register") => void;
-  onEmail: (value: string) => void; onPassword: (value: string) => void; onName: (value: string) => void; onCode: (value: string) => void;
+  onClose: () => void; onSubmit: () => void; onVerify: () => void; onResend: () => void; onResetRequest: () => void; onResetVerify: () => void; onResetResend: () => void; onOpenReset: () => void; onBackToLogin: () => void; onModeChange: (mode: "login" | "register") => void;
+  onEmail: (value: string) => void; onPassword: (value: string) => void; onPasswordConfirm: (value: string) => void; onName: (value: string) => void; onCode: (value: string) => void;
 }) {
-  return <div className="auth-backdrop"><form className={`auth-dialog${busy ? " is-busy" : ""}`} aria-busy={busy} onSubmit={(event) => { event.preventDefault(); if (!busy) verifying ? onVerify() : onSubmit(); }}>
+  const verifyingReset = resetting && resetVerifying;
+  const title = verifying ? "验证你的邮箱" : verifyingReset ? "设置新密码" : resetting ? "重设密码" : mode === "login" ? "欢迎回来" : "创建你的阅读空间";
+  return <div className="auth-backdrop"><form className={`auth-dialog${busy ? " is-busy" : ""}`} aria-busy={busy} onSubmit={(event) => { event.preventDefault(); if (!busy) { if (verifying) onVerify(); else if (verifyingReset) onResetVerify(); else if (resetting) onResetRequest(); else onSubmit(); } }}>
     <button type="button" className="popover-close" onClick={onClose} disabled={busy}><X size={16} /></button>
     <div className="auth-brand"><img src="/brand/shidea-mark.png" alt="" /><span>识谛 <em>shidea</em></span></div>
-    <div className="auth-heading"><h2>{verifying ? "验证你的邮箱" : mode === "login" ? "欢迎回来" : "创建你的阅读空间"}</h2></div>
-    {verifying ? <div className="auth-fields verification-fields"><p>验证码已发送至 <strong>{email}</strong></p><label>六位验证码<input disabled={busy} className="verification-code" inputMode="numeric" autoComplete="one-time-code" autoFocus placeholder="000000" required minLength={6} maxLength={6} value={code} onChange={(event) => onCode(event.target.value.replace(/\D/g, "").slice(0, 6))} /></label><button className="auth-inline-action" type="button" disabled={busy} onClick={onResend}>重新发送验证码</button></div> : <><div className="auth-tabs" role="tablist"><button disabled={busy} className={mode === "login" ? "active" : ""} type="button" onClick={() => onModeChange("login")}>登录</button><button disabled={busy} className={mode === "register" ? "active" : ""} type="button" onClick={() => onModeChange("register")}>注册</button></div><div className="auth-fields">
+    <div className="auth-heading"><h2>{title}</h2></div>
+    {verifying ? <div className="auth-fields verification-fields"><p>验证码已发送至 <strong>{email}</strong></p><label>六位验证码<input disabled={busy} className="verification-code" inputMode="numeric" autoComplete="one-time-code" autoFocus placeholder="000000" required minLength={6} maxLength={6} value={code} onChange={(event) => onCode(event.target.value.replace(/\D/g, "").slice(0, 6))} /></label><button className="auth-inline-action" type="button" disabled={busy} onClick={onResend}>重新发送验证码</button></div> : verifyingReset ? <div className="auth-fields verification-fields"><p>验证码已发送至 <strong>{email}</strong></p><label>六位验证码<input disabled={busy} className="verification-code" inputMode="numeric" autoComplete="one-time-code" autoFocus placeholder="000000" required minLength={6} maxLength={6} value={code} onChange={(event) => onCode(event.target.value.replace(/\D/g, "").slice(0, 6))} /></label><label>新密码<input disabled={busy} type="password" required minLength={8} autoComplete="new-password" placeholder="至少 8 位" value={password} onChange={event => onPassword(event.target.value)} /></label><label>确认新密码<input disabled={busy} type="password" required minLength={8} autoComplete="new-password" placeholder="再次输入新密码" value={passwordConfirm} onChange={event => onPasswordConfirm(event.target.value)} /></label><button className="auth-inline-action" type="button" disabled={busy} onClick={onResetResend}>重新发送验证码</button></div> : resetting ? <div className="auth-fields"><p className="auth-reset-intro">输入注册邮箱，我们会发送一枚用于重设密码的六位验证码。</p><label>邮箱<input disabled={busy} type="email" autoFocus placeholder="name@example.com" required autoComplete="email" value={email} onChange={event => onEmail(event.target.value)} /></label><button type="button" className="auth-inline-action" onClick={onBackToLogin}>返回登录</button></div> : <><div className="auth-tabs" role="tablist"><button disabled={busy} className={mode === "login" ? "active" : ""} type="button" onClick={() => onModeChange("login")}>登录</button><button disabled={busy} className={mode === "register" ? "active" : ""} type="button" onClick={() => onModeChange("register")}>注册</button></div><div className="auth-fields">
       {mode === "register" && <label>用户名<input disabled={busy} placeholder="至少 3 个字符" required minLength={3} value={name} onChange={(event) => onName(event.target.value)} /></label>}
       <label>邮箱<input disabled={busy} type="email" placeholder="name@example.com" required autoComplete="email" value={email} onChange={(event) => onEmail(event.target.value)} /></label>
       <label>密码<input disabled={busy} type="password" placeholder="至少 8 位" required minLength={8} autoComplete={mode === "login" ? "current-password" : "new-password"} value={password} onChange={(event) => onPassword(event.target.value)} /></label>
-    </div></>}
+    </div>{mode === "login" && <button type="button" className="auth-forgot-password" onClick={onOpenReset} disabled={busy}>忘记密码？</button>}</>}
     {error && <p className="auth-feedback error">{error}</p>}{notice && <p className="auth-feedback auth-notice">{notice}</p>}
-    <button className="auth-submit" type="submit" disabled={busy}>{busy ? <><RefreshCw className="auth-spinner" size={17} />{busyLabel}</> : <>{verifying ? "完成验证" : mode === "login" ? "登录识谛" : "发送验证码"}<ChevronRight size={17} /></>}</button>
+    <button className="auth-submit" type="submit" disabled={busy}>{busy ? <><RefreshCw className="auth-spinner" size={17} />{busyLabel}</> : <>{verifying ? "完成验证" : verifyingReset ? "确认重设密码" : resetting ? "发送验证码" : mode === "login" ? "登录识谛" : "发送验证码"}<ChevronRight size={17} /></>}</button>
   </form></div>;
 }
 
@@ -1432,11 +1436,14 @@ function App() {
   const [authMode, setAuthMode] = useState<"login" | "register">("login");
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
+  const [authPasswordConfirm, setAuthPasswordConfirm] = useState("");
   const [authName, setAuthName] = useState("");
   const [authNotice, setAuthNotice] = useState("");
   const [authError, setAuthError] = useState("");
   const [authCode, setAuthCode] = useState("");
   const [authVerifying, setAuthVerifying] = useState(false);
+  const [authResetting, setAuthResetting] = useState(false);
+  const [authResetVerifying, setAuthResetVerifying] = useState(false);
   const [authBusy, setAuthBusy] = useState(false);
   const [authBusyLabel, setAuthBusyLabel] = useState("");
   const [urlOpen, setUrlOpen] = useState(false);
@@ -1840,6 +1847,32 @@ function App() {
       if (!response.ok) throw new Error(result.error || "EMAIL_SEND_FAILED");
       setAuthNotice("新的验证码已发送，请查收邮箱。");
     } catch (error) { const message=error instanceof Error?error.message:"EMAIL_SEND_FAILED"; setAuthError(apiErrors[message] || message); }
+    finally { setAuthBusy(false); setAuthBusyLabel(""); }
+  }
+  function beginPasswordReset() {
+    setAuthResetting(true); setAuthResetVerifying(false); setAuthVerifying(false); setAuthCode(""); setAuthPassword(""); setAuthPasswordConfirm(""); setAuthError(""); setAuthNotice("");
+  }
+  function backToLogin() {
+    setAuthResetting(false); setAuthResetVerifying(false); setAuthCode(""); setAuthPassword(""); setAuthPasswordConfirm(""); setAuthError(""); setAuthNotice(""); setAuthMode("login");
+  }
+  async function requestPasswordReset() {
+    setAuthError(""); setAuthNotice(""); setAuthBusy(true); setAuthBusyLabel("正在发送验证码…");
+    try {
+      const response = await functionRequest("request-password-reset", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: authEmail }) });
+      const result = await response.json(); if (!response.ok) throw new Error(result.error || "EMAIL_SEND_FAILED");
+      setAuthCode(""); setAuthResetVerifying(true); setAuthNotice("若该邮箱已注册，验证码已发送，请查收邮箱。");
+    } catch (error) { const message=error instanceof Error?error.message:"EMAIL_SEND_FAILED"; setAuthError(apiErrors[message] || message); }
+    finally { setAuthBusy(false); setAuthBusyLabel(""); }
+  }
+  async function resetPassword() {
+    setAuthError(""); setAuthNotice(""); setAuthBusy(true); setAuthBusyLabel("正在重设密码…");
+    try {
+      if (authCode.length !== 6) throw new Error("请输入六位验证码。");
+      if (authPassword !== authPasswordConfirm) throw new Error("PASSWORD_MISMATCH");
+      const response = await functionRequest("reset-password", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: authEmail, code: authCode, password: authPassword }) });
+      const result = await response.json(); if (!response.ok) throw new Error(result.error || "PASSWORD_RESET_FAILED");
+      setAuthNotice("密码已重设，请使用新密码登录。"); setAuthResetting(false); setAuthResetVerifying(false); setAuthCode(""); setAuthPassword(""); setAuthPasswordConfirm(""); setAuthMode("login");
+    } catch (error) { const message=error instanceof Error?error.message:"PASSWORD_RESET_FAILED"; setAuthError(apiErrors[message] || message); }
     finally { setAuthBusy(false); setAuthBusyLabel(""); }
   }
   async function signOut() {
@@ -2438,7 +2471,7 @@ function App() {
           onOpenLibrary={() => session ? setLibraryOpen(true) : setAuthOpen(true)}
         />
         <input ref={fileInput} className="welcome-file-input" type="file" accept="application/pdf" onChange={(event) => event.target.files?.[0] && openFile(event.target.files[0])} />
-        {authOpen && (session ? <AccountDialog session={session} usage={usage} onClose={() => setAuthOpen(false)} onSignOut={() => { signOut(); setAuthOpen(false); }} onOpenLibrary={() => { setAuthOpen(false); setLibraryOpen(true); }} /> : <AuthDialog mode={authMode} email={authEmail} password={authPassword} name={authName} code={authCode} error={authError} notice={authNotice} verifying={authVerifying} busy={authBusy} busyLabel={authBusyLabel} onClose={() => setAuthOpen(false)} onSubmit={submitAuth} onVerify={verifyEmailCode} onResend={resendEmailCode} onModeChange={(nextMode) => { setAuthMode(nextMode); setAuthVerifying(false); setAuthError(""); setAuthNotice(""); }} onEmail={setAuthEmail} onPassword={setAuthPassword} onName={setAuthName} onCode={setAuthCode} />)}
+        {authOpen && (session ? <AccountDialog session={session} usage={usage} onClose={() => setAuthOpen(false)} onSignOut={() => { signOut(); setAuthOpen(false); }} onOpenLibrary={() => { setAuthOpen(false); setLibraryOpen(true); }} /> : <AuthDialog mode={authMode} email={authEmail} password={authPassword} passwordConfirm={authPasswordConfirm} name={authName} code={authCode} error={authError} notice={authNotice} verifying={authVerifying} resetting={authResetting} resetVerifying={authResetVerifying} busy={authBusy} busyLabel={authBusyLabel} onClose={() => setAuthOpen(false)} onSubmit={submitAuth} onVerify={verifyEmailCode} onResend={resendEmailCode} onResetRequest={requestPasswordReset} onResetVerify={resetPassword} onResetResend={requestPasswordReset} onOpenReset={beginPasswordReset} onBackToLogin={backToLogin} onModeChange={(nextMode) => { setAuthMode(nextMode); setAuthVerifying(false); setAuthResetting(false); setAuthResetVerifying(false); setAuthError(""); setAuthNotice(""); }} onEmail={setAuthEmail} onPassword={setAuthPassword} onPasswordConfirm={setAuthPasswordConfirm} onName={setAuthName} onCode={setAuthCode} />)}
         {urlOpen && <UrlImportDialog value={paperUrl} error={urlError} loading={urlLoading} onChange={value => { setPaperUrl(value); setUrlError(""); }} onClose={() => setUrlOpen(false)} onSubmit={openPdfUrl} />}
         {!embeddedReader && <ExtensionAutoOpenToggle />}
       </div>
@@ -2807,7 +2840,7 @@ function App() {
         </aside>
       </main>
       <NoticeStack notices={notices} onDismiss={dismissNotice}/>
-      {authOpen && (session ? <AccountDialog session={session} usage={usage} onClose={() => setAuthOpen(false)} onSignOut={() => { signOut(); setAuthOpen(false); }} onOpenLibrary={() => { setAuthOpen(false); setLibraryOpen(true); }} /> : <AuthDialog mode={authMode} email={authEmail} password={authPassword} name={authName} code={authCode} error={authError} notice={authNotice} verifying={authVerifying} busy={authBusy} busyLabel={authBusyLabel} onClose={() => setAuthOpen(false)} onSubmit={submitAuth} onVerify={verifyEmailCode} onResend={resendEmailCode} onModeChange={(nextMode) => { setAuthMode(nextMode); setAuthVerifying(false); setAuthError(""); setAuthNotice(""); }} onEmail={setAuthEmail} onPassword={setAuthPassword} onName={setAuthName} onCode={setAuthCode} />)}
+      {authOpen && (session ? <AccountDialog session={session} usage={usage} onClose={() => setAuthOpen(false)} onSignOut={() => { signOut(); setAuthOpen(false); }} onOpenLibrary={() => { setAuthOpen(false); setLibraryOpen(true); }} /> : <AuthDialog mode={authMode} email={authEmail} password={authPassword} passwordConfirm={authPasswordConfirm} name={authName} code={authCode} error={authError} notice={authNotice} verifying={authVerifying} resetting={authResetting} resetVerifying={authResetVerifying} busy={authBusy} busyLabel={authBusyLabel} onClose={() => setAuthOpen(false)} onSubmit={submitAuth} onVerify={verifyEmailCode} onResend={resendEmailCode} onResetRequest={requestPasswordReset} onResetVerify={resetPassword} onResetResend={requestPasswordReset} onOpenReset={beginPasswordReset} onBackToLogin={backToLogin} onModeChange={(nextMode) => { setAuthMode(nextMode); setAuthVerifying(false); setAuthResetting(false); setAuthResetVerifying(false); setAuthError(""); setAuthNotice(""); }} onEmail={setAuthEmail} onPassword={setAuthPassword} onPasswordConfirm={setAuthPasswordConfirm} onName={setAuthName} onCode={setAuthCode} />)}
       {urlOpen && <UrlImportDialog value={paperUrl} error={urlError} loading={urlLoading} onChange={value => { setPaperUrl(value); setUrlError(""); }} onClose={() => setUrlOpen(false)} onSubmit={openPdfUrl} />}
       {!embeddedReader && <ExtensionAutoOpenToggle />}
     </div>

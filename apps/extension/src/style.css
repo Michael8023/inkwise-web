@@ -149,6 +149,9 @@ button {
 .verification-code { letter-spacing: .5em; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 19px; font-weight: 700; text-align: center; }
 .auth-inline-action { justify-self: start; border: 0; background: transparent; color: var(--accent); padding: 0; font-size: 12px; cursor: pointer; }
 .auth-inline-action:hover { text-decoration: underline; }
+.auth-forgot-password { justify-self: end; margin-top: -4px; border: 0; background: transparent; color: var(--text-secondary); padding: 0; font-size: 12px; cursor: pointer; }
+.auth-forgot-password:hover { color: var(--accent); text-decoration: underline; }
+.auth-reset-intro { margin: 0; color: var(--text-secondary); font-size: 12px; line-height: 1.65; }
 .auth-fields label { display: grid; gap: 6px; color: var(--text-secondary); font-size: 12px; font-weight: 600; }
 .auth-dialog input { width: 100%; min-height: 44px; border: 1px solid var(--border); border-radius: 9px; background: rgba(255,255,255,.55); padding: 11px 12px; color: var(--text); transition: border-color .16s ease, box-shadow .16s ease, background .16s ease; }
 :root[data-theme="dark"] .auth-dialog input { background: rgba(11,13,20,.35); }
@@ -674,6 +677,14 @@ button {
 .drawer-history article p { margin: 5px 0 0; color: #61706b; font-size: 10px; }
 .history-empty { color: #919c98; font-size: 11px; }
 .admin-danger-zone { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 28px; border: 1px solid #f0caca; border-radius: 7px; background: #fff7f7; padding: 15px; }
+.admin-password-reset { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 26px; border: 1px solid #d9e8e4; border-radius: 8px; background: #f8fcfb; padding: 16px; }
+.admin-password-reset h3, .admin-password-reset p { grid-column: 1 / -1; margin: 0; }
+.admin-password-reset h3 { color: #246d57; font-size: 13px; }
+.admin-password-reset p { color: #71817a; font-size: 11px; line-height: 1.5; }
+.admin-password-reset label { display: grid; gap: 7px; color: #788781; font-size: 12px; font-weight: 650; }
+.admin-password-reset input { width: 100%; border: 1px solid #d9e2de; border-radius: 6px; background: #fff; padding: 10px 11px; color: #17201d; font: inherit; }
+.admin-password-reset button { grid-column: 1 / -1; min-height: 40px; border: 0; border-radius: 6px; background: #2e9474; color: #fff; font-weight: 700; cursor: pointer; }
+.admin-password-reset button:disabled { opacity: .6; }
 .admin-danger-zone div { display: grid; gap: 4px; }
 .admin-danger-zone strong { color: #8f3535; font-size: 12px; }
 .admin-danger-zone span { color: #9b6969; font-size: 10px; line-height: 1.5; }
@@ -707,6 +718,7 @@ button {
   .plan-editor { grid-template-columns: 1fr; }
   .plan-editor > div { justify-content: flex-end; }
   .adjust-form { grid-template-columns: 1fr; }
+  .admin-password-reset { grid-template-columns: 1fr; }
   .adjust-form h3, .adjust-form label:nth-of-type(4), .adjust-form > button { grid-column: 1; }
 }
 

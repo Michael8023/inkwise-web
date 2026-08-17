@@ -18,6 +18,10 @@ verify_jwt = false
 verify_jwt = false
 [functions.complete-signup]
 verify_jwt = false
+[functions.request-password-reset]
+verify_jwt = false
+[functions.reset-password]
+verify_jwt = false
 [functions.admin-users]
 verify_jwt = true
 [functions.ai-visual]

@@ -29,6 +29,10 @@ const errors: Record<string, string> = {
   INVALID_MODELS: "请至少选择一个有效模型。",
   UPSTREAM_MODELS_FAILED: "无法读取模型服务列表，请稍后刷新重试。",
   NETWORK_REQUEST_FAILED: "请求未能到达后台。请确认 Edge Function 已部署，并检查网络或跨域配置。",
+  PASSWORD_INVALID: "密码长度需为 8 至 72 位。",
+  PASSWORD_MISMATCH: "两次输入的密码不一致。",
+  ADMIN_PASSWORD_SELF_FORBIDDEN: "请使用账户中心的忘记密码流程重设自己的密码。",
+  PASSWORD_RESET_FAILED: "密码重设失败，请稍后重试。",
 };
 function formatStorage(bytes: number) {
   if (!bytes) return "0 MB";
@@ -60,6 +64,9 @@ function AdminApp() {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleteConfirmation, setDeleteConfirmation] = useState("");
   const [deleting, setDeleting] = useState(false);
+  const [adminPassword, setAdminPassword] = useState("");
+  const [adminPasswordConfirm, setAdminPasswordConfirm] = useState("");
+  const [passwordSaving, setPasswordSaving] = useState(false);
   const [editingPlanId, setEditingPlanId] = useState<string | null>(null);
   const [planName, setPlanName] = useState("");
   const [planCredits, setPlanCredits] = useState("100");
@@ -127,7 +134,7 @@ function AdminApp() {
     if (authError) setError(authError.message);
   }
   async function openUser(item: AdminUser) {
-    setSelected(item); setPlanId(item.plan_id || ""); setDetail(null); setError("");
+    setSelected(item); setPlanId(item.plan_id || ""); setDetail(null); setError(""); setAdminPassword(""); setAdminPasswordConfirm("");
     try { setDetail(await request(`?userId=${item.user_id}`)); }
     catch (cause) { const code=cause instanceof Error?cause.message:""; setError(errors[code] || code || "记录加载失败。"); }
   }
@@ -152,6 +159,16 @@ function AdminApp() {
       setSelected(null); setDetail(null); setDeleteConfirmOpen(false); setDeleteConfirmation("");
     } catch (cause) { const code=cause instanceof Error?cause.message:""; setError(errors[code] || code || "删除用户失败。"); }
     finally { setDeleting(false); }
+  }
+  async function resetUserPassword(event: React.FormEvent) {
+    event.preventDefault(); if (!selected) return;
+    if (adminPassword !== adminPasswordConfirm) { setError(errors.PASSWORD_MISMATCH); return; }
+    setPasswordSaving(true); setError("");
+    try {
+      await request("", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "resetPassword", userId: selected.user_id, password: adminPassword }) });
+      setAdminPassword(""); setAdminPasswordConfirm("");
+    } catch (cause) { const code=cause instanceof Error?cause.message:""; setError(errors[code] || code || "密码重设失败。"); }
+    finally { setPasswordSaving(false); }
   }
   function beginPlanEdit(plan?: Plan) {
     setEditingPlanId(plan?.id || "new"); setPlanName(plan?.name || "");
@@ -186,6 +203,7 @@ function AdminApp() {
     {selected && <div className="admin-drawer-backdrop" onMouseDown={event => event.target === event.currentTarget && setSelected(null)}><aside className="admin-drawer"><button className="admin-close" onClick={() => setSelected(null)}><X size={18}/></button><div className="drawer-user"><div>{(selected.display_name || selected.email).slice(0,1).toUpperCase()}</div><span><h2>{selected.display_name || selected.username || "用户"}</h2><p>{selected.email}</p></span></div><div className="drawer-balance"><Coins size={20}/><span>当前可用额度<strong>{Number(selected.credits_remaining).toLocaleString()} 分</strong></span></div><div className="drawer-library-usage"><FileText size={19}/><span>个人文献库<strong>{Number(selected.library_paper_count || 0).toLocaleString()} 篇 · {formatStorage(Number(selected.library_storage_bytes || 0))}</strong></span></div>
       <form className="adjust-form" onSubmit={saveAdjustment}><h3>调整账户</h3><label>操作<select value={operation} onChange={event => setOperation(event.target.value)}><option value="add">增加额度</option><option value="subtract">扣减额度</option><option value="set">设为指定额度</option></select></label><label>额度<input type="number" min="0" max="10000000" required value={amount} onChange={event => setAmount(event.target.value)}/></label><label>套餐<select value={planId} onChange={event => setPlanId(event.target.value)}>{plans.map(plan => <option value={plan.id} key={plan.id}>{plan.name.toUpperCase()} · 月额度 {plan.monthly_credits}</option>)}</select></label><label>操作备注<textarea maxLength={300} placeholder="例如：购买 Pro 套餐、活动赠送" value={note} onChange={event => setNote(event.target.value)}/></label><button disabled={saving}>{saving ? "正在保存…" : "确认调整"}</button></form>
       <section className="drawer-history"><h3>人工调整</h3>{detail?.adjustments.map(item => <article key={item.id}><Sparkles size={14}/><div><strong>{item.operation === "add" ? "+" : item.operation === "subtract" ? "-" : "="}{item.amount} 分</strong><span>{item.credits_before} → {item.credits_after} · {new Date(item.created_at).toLocaleString("zh-CN")}</span>{item.note && <p>{item.note}</p>}</div></article>)}{detail && !detail.adjustments.length && <p className="history-empty">暂无人工调整记录</p>}<h3>近期 AI 消费</h3>{detail?.usage.map(item => <article key={item.id}><Coins size={14}/><div><strong>-{item.credits} 分 · {item.feature}</strong><span>{item.model} · {new Date(item.created_at).toLocaleString("zh-CN")}</span></div></article>)}{detail && !detail.usage.length && <p className="history-empty">暂无 AI 消费记录</p>}</section>
+      <form className="admin-password-reset" onSubmit={resetUserPassword}><h3>直接重设密码</h3><p>无需验证码。请将新密码安全地告知该用户。</p><label>新密码<input type="password" required minLength={8} maxLength={72} autoComplete="new-password" value={adminPassword} onChange={event => setAdminPassword(event.target.value)} /></label><label>确认新密码<input type="password" required minLength={8} maxLength={72} autoComplete="new-password" value={adminPasswordConfirm} onChange={event => setAdminPasswordConfirm(event.target.value)} /></label><button disabled={passwordSaving}>{passwordSaving ? "正在重设…" : "重设此用户密码"}</button></form>
       <section className="admin-danger-zone"><div><strong>删除用户</strong><span>该操作会永久删除登录账户及关联额度、用量和资料。</span></div><button type="button" onClick={() => { setDeleteConfirmation(""); setDeleteConfirmOpen(true); }}><Trash2 size={15}/>删除账户</button></section>
       {deleteConfirmOpen && <div className="admin-confirm"><div><h3>永久删除账户？</h3><p>此操作不可撤销。请输入目标用户邮箱以确认：</p><strong>{selected.email}</strong><input autoFocus value={deleteConfirmation} onChange={event => setDeleteConfirmation(event.target.value)} placeholder="输入完整邮箱地址" /><footer><button type="button" onClick={() => setDeleteConfirmOpen(false)} disabled={deleting}>取消</button><button type="button" className="admin-delete-confirm" onClick={deleteUser} disabled={deleting || deleteConfirmation.trim().toLowerCase() !== selected.email.toLowerCase()}>{deleting ? "正在删除…" : "永久删除"}</button></footer></div></div>}
     </aside></div>}

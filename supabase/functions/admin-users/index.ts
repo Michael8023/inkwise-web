@@ -45,6 +45,7 @@ function statusFor(message: string) {
   if (message === "ADMIN_DELETE_FORBIDDEN") return 403;
   if (message === "PLAN_NOT_FOUND") return 404;
   if (message === "PLAN_NAME_EXISTS") return 409;
+  if (message === "PASSWORD_INVALID") return 400;
   if (message === "UPSTREAM_MODELS_FAILED") return 502;
   return 400;
 }
@@ -95,6 +96,18 @@ Deno.serve(async req => {
     }
     if (req.method === "POST") {
       const input = await body(req);
+      if (input.action === "resetPassword") {
+        const userId = String(input.userId || "");
+        const password = String(input.password || "");
+        if (!/^[0-9a-f-]{36}$/i.test(userId)) throw new Error("USER_NOT_FOUND");
+        if (password.length < 8 || password.length > 72) throw new Error("PASSWORD_INVALID");
+        if (userId === currentUser.id) throw new Error("ADMIN_PASSWORD_SELF_FORBIDDEN");
+        const { data: target, error: targetError } = await db.auth.admin.getUserById(userId);
+        if (targetError || !target.user) throw new Error("USER_NOT_FOUND");
+        const { error: updateError } = await db.auth.admin.updateUserById(userId, { password });
+        if (updateError) throw new Error("PASSWORD_RESET_FAILED");
+        return json({ ok: true, userId });
+      }
       if (input.action === "saveModels") {
         const models = Array.isArray(input.models) ? input.models : [];
         if (!models.length || models.length > 500) throw new Error("INVALID_MODELS");
