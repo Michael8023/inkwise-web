@@ -1,5 +1,5 @@
 import { corsHeaders, preflight } from "../_shared/cors.ts";
-import { admin, body, json, rateLimit, user } from "../_shared/core.ts";
+import { admin, body, json, rateLimit, refund_credits, user } from "../_shared/core.ts";
 
 type Action = "direct" | "outline" | "content" | "markdown" | "status" | "download";
 
@@ -58,6 +58,18 @@ Deno.serve(async (req) => {
     const action = clean(input.action, 20) as Action;
     if (!Object.hasOwn(paths, action)) throw new Error("PPT_ACTION_INVALID");
     const request = input.request && typeof input.request === "object" ? input.request as Record<string, unknown> : {};
+    const isPptTaskStart = action === "content" && Boolean(request.asyncGenPptx);
+    const billingRequestId = clean(request.billingRequestId, 160);
+    if (isPptTaskStart && !billingRequestId) throw new Error("PPT_BILLING_REQUEST_REQUIRED");
+    if (isPptTaskStart) {
+      const { data: quota, error: quotaError } = await admin().rpc("consume_ai_ppt_quota", {
+        p_user_id: currentUser.id,
+        p_request_id: billingRequestId,
+        p_input_chars: clean(request.outlineMarkdown, 100000).length,
+      });
+      if (quotaError) throw quotaError;
+      if (!quota?.ok) throw new Error(String(quota?.error || "PPT_QUOTA_EXCEEDED"));
+    }
     // Chat-completions uses APILIO_BASE_URL ending in /v1, while DocMee is
     // mounted at the Apilio root as /docmee/v1/… . Normalize both deployments.
     const configuredBaseUrl = (Deno.env.get("APILIO_BASE_URL") || "https://api.apilio.ai/v1").replace(/\/+$/, "");
@@ -75,6 +87,7 @@ Deno.serve(async (req) => {
     });
     if (!upstream.ok) {
       const detail = clean(await upstream.text(), 500);
+      if (isPptTaskStart) await refund_credits(billingRequestId, `DOCMEE_UPSTREAM_${upstream.status}`);
       throw new Error(`DOCMEE_UPSTREAM_${upstream.status}${detail ? `:${detail}` : ""}`);
     }
     if (wantsStream && upstream.body) {

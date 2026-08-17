@@ -1934,6 +1934,7 @@ body.is-resizing-panel * {
 .ppt-pro-card h2 { margin: 9px 0 10px; color: #123d70; font-size: 23px; }
 .ppt-pro-card p { max-width: 410px; margin: 0; color: #5d7a87; font-size: 13px; line-height: 1.75; }
 .ppt-pro-card small { margin-top: 20px; border-radius: 99px; background: #edf7f6; color: #287775; padding: 8px 13px; font-size: 11px; }
+.ppt-studio .ppt-quota { display: inline-flex; align-items: center; gap: 5px; margin-top: 12px; border: 1px solid #cce9e4; border-radius: 99px; background: #f1fbf9; color: #1e7975; padding: 6px 10px; font-size: 11px; font-weight: 700; }
 @media (max-width: 1320px) { .ppt-studio-v2 .ppt-config { grid-template-columns: minmax(220px, .8fr) minmax(300px, 1.2fr) 1fr; }.ppt-studio-v2 .ppt-config fieldset { grid-column: span 2; }.ppt-studio-v2 .ppt-config .ppt-generate { grid-column: 3; grid-row: 2; align-self: end; } }
 @media (max-width: 900px) { .ppt-studio-v2 .ppt-config { grid-template-columns: 1fr 1fr; }.ppt-studio-v2 .ppt-config fieldset { grid-column: 1 / -1; }.ppt-studio-v2 .ppt-config .ppt-generate { grid-column: 1 / -1; grid-row: auto; width: 100%; }.ppt-pro-card { margin-top: 12px; padding: 34px 23px; } }
 @media (max-width: 620px) { .ppt-studio-v2 .ppt-config { grid-template-columns: 1fr; padding: 16px; }.ppt-studio-v2 .ppt-config fieldset { grid-template-columns: 1fr; grid-column: auto; }.ppt-studio-v2 .ppt-config .ppt-generate { grid-column: auto; }.ppt-pro-card h2 { font-size: 20px; } }
