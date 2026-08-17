@@ -6,8 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "package:edge": "npm run build && rm -f ../../dist/shidea-edge-extension.zip && mkdir -p ../../dist && cd dist && bsdtar -a -c -f ../../../dist/shidea-edge-extension.zip .",
-    "deploy": "wrangler deploy",
+    "package:edge": "npm run build && rm -f ../../dist/shidea-edge-extension.zip && mkdir -p ../../dist && cd dist && bsdtar -a -c -f ../../../dist/shidea-edge-extension.zip --exclude=downloads . && mkdir -p ../public/downloads && cp ../../../dist/shidea-edge-extension.zip ../public/downloads/shidea-edge-extension.zip && npm run build",
+    "deploy": "npm run package:edge && wrangler deploy",
     "test": "vitest run"
   },
   "dependencies": {

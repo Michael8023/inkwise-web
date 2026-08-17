@@ -9,6 +9,18 @@
 - 🔍 **智能导入** - 支持 DOI 自动解析，多源获取学术论文
 - 🎨 **图表识别** - 框选图片、表格、公式，AI 自动解读
 - 📑 **版面分析** - 智能识别文档结构（图片、表格、公式）
+- 🧠 **研究工作流** - 文献工作台、个人研究主线与 Brainstorm 多文献研究启发
+
+## 产品主页与插件安装
+
+- 产品宣传页：`https://www.inkwise.site/about`
+- 在线阅读器：`https://www.inkwise.site/`
+- 插件安装包：`https://www.inkwise.site/downloads/shidea-edge-extension.zip`
+- 历史版本：[GitHub Releases](https://github.com/Michael8023/inkwise-web/releases)
+
+识谛目前支持 Microsoft Edge 和 Google Chrome：下载 ZIP 后解压，打开 `edge://extensions` 或 `chrome://extensions`，开启开发者/开发人员模式，选择“加载解压缩的扩展程序”并选择解压后的目录。加载完成后可在扩展菜单中固定识谛图标。
+
+每次执行 `npm --workspace apps/extension run package:edge` 会重新打包插件，并将最新 ZIP 同步到官网静态下载路径；`npm --workspace apps/extension run deploy` 会先完成该同步再部署。
 
 ## 论文导入功能
 

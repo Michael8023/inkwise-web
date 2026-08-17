@@ -48,6 +48,7 @@ import {
 } from "lucide-react";
 import "./style.css";
 import { mountAdmin } from "./admin";
+import { AboutPage } from "./about";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   "pdfjs-dist/build/pdf.worker.mjs",
@@ -2984,5 +2985,6 @@ function App() {
   );
 }
 if (window.location.pathname === "/admin" || window.location.pathname.startsWith("/admin/")) mountAdmin();
+else if (window.location.pathname === "/about" || window.location.pathname.startsWith("/about/")) createRoot(document.getElementById("root")!).render(<AboutPage />);
 else if (new URL(window.location.href).searchParams.has("payment") || new URL(window.location.href).searchParams.has("out_trade_no")) createRoot(document.getElementById("root")!).render(<PaymentResultScreen />);
 else createRoot(document.getElementById("root")!).render(<App />);
