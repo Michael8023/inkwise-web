@@ -1520,7 +1520,6 @@ function App() {
   const [visualMode, setVisualMode] = useState(false);
   const [visualSelections, setVisualSelections] = useState<VisualSelection[]>([]);
   const [mineruRegions, setMineruRegions] = useState<VisualRegion[]>([]);
-  const [mineruMarkdown, setMineruMarkdown] = useState("");
   const [mineruReady, setMineruReady] = useState(false);
   const [layoutState, setLayoutState] = useState<LayoutState>({ state: "idle" });
   const pdfBytes = useRef<ArrayBuffer | null>(null);
@@ -1741,7 +1740,7 @@ function App() {
     if (!session || !currentPaperId || !documentReady || !paperStateLoaded || libraryHydrating.current) return;
     const timer = window.setTimeout(() => void persistLibraryState(), 900);
     return () => window.clearTimeout(timer);
-  }, [session, currentPaperId, documentReady, paperStateLoaded, currentPage, scale, highlights, selections, visualSelections, mineruRegions, mineruMarkdown, mineruReady, documentTitle, outline, summary, messages]);
+  }, [session, currentPaperId, documentReady, paperStateLoaded, currentPage, scale, highlights, selections, visualSelections, mineruRegions, mineruReady, documentTitle, outline, summary, messages]);
   useEffect(() => {
     if (!session || !currentPaperId || !documentTitle) return;
     void supabase.from("library_papers").update({ title: documentTitle.slice(0, 500) }).eq("id", currentPaperId).then(({ error }) => {
@@ -1885,7 +1884,6 @@ function App() {
     setMessages(Array.isArray(state.messages) ? state.messages as ChatMessage[] : []);
     setSummary(state.summary && typeof state.summary === "object" ? state.summary as { short?: string; full?: string } : {});
     setMineruRegions(Array.isArray(layout.regions) ? layout.regions as VisualRegion[] : []);
-    setMineruMarkdown(typeof layout.markdown === "string" ? layout.markdown : "");
     setMineruReady(Boolean(layout.ready));
     setDetectedDocumentTitle(typeof layout.documentTitle === "string" ? layout.documentTitle : "", true);
     if (Array.isArray(layout.outline) && layout.outline.length) setOutline(layout.outline as OutlineItem[]);
@@ -1902,7 +1900,7 @@ function App() {
       currentPage, scale, highlights, selections, visualSelections: [], messages,
       summary: { short: summary.short, full: summary.full },
     };
-    const layoutResult = mineruReady ? { ready: true, regions: mineruRegions, markdown: mineruMarkdown || null, outline, documentTitle: documentTitle || null } : null;
+    const layoutResult = mineruReady ? { ready: true, regions: mineruRegions, outline, documentTitle: documentTitle || null } : null;
     const { error } = await supabase.from("library_paper_states").upsert({
       paper_id: currentPaperId, user_id: session.user.id, reader_state: sanitizeCloudValue(readerState), layout_result: sanitizeCloudValue(layoutResult), updated_at: new Date().toISOString(),
     });
@@ -2057,7 +2055,7 @@ function App() {
     setCurrentPaperId(options.paperId || "");
     setPaperStateLoaded(!options.paperId);
     importSourceUrl.current = options.sourceUrl || null;
-    setSelections([]); setHighlights([]); setVisualSelections([]); setVisualMode(false); setMineruRegions([]); setMineruMarkdown(""); setMineruReady(false); detectedDocumentTitle.current = ""; setDocumentTitle(""); setLayoutState({ state: "idle" }); autoLayoutDocument.current = "";
+    setSelections([]); setHighlights([]); setVisualSelections([]); setVisualMode(false); setMineruRegions([]); setMineruReady(false); detectedDocumentTitle.current = ""; setDocumentTitle(""); setLayoutState({ state: "idle" }); autoLayoutDocument.current = "";
     setDocumentReady(false); setDocumentText(""); setPdf(null); setOutline([]);
     setFileName(name);
     setSummary({}); setSummaryOpen({ short: false, full: false });
@@ -2232,16 +2230,13 @@ function App() {
       const zip = await JSZip.loadAsync(await zipResponse.arrayBuffer());
       const jsonFiles = Object.values(zip.files).filter((file: JSZip.JSZipObject) => /(?:content_list|layout)\.json$/i.test(file.name));
       const raw: unknown[] = await Promise.all(jsonFiles.map((file: JSZip.JSZipObject) => file.async("string").then((text: string) => JSON.parse(text)).catch(() => null)));
-      const markdownFiles = Object.values(zip.files).filter((file: JSZip.JSZipObject) => !file.dir && /\.md$/i.test(file.name));
-      const parsedMarkdown = (await Promise.all(markdownFiles.map((file: JSZip.JSZipObject) => file.async("string").catch(() => ""))))
-        .filter(Boolean).sort((a, b) => b.length - a.length)[0] || "";
       const sizes = await Promise.all(Array.from({ length: pdf.numPages }, (_, index) => pdf.getPage(index + 1).then((page: any) => { const viewport = page.getViewport({ scale: 1 }); return { width: viewport.width, height: viewport.height }; })));
       const regions = raw.flatMap((value: unknown) => collectMineruRegions(value, sizes));
       const parsedOutline = collectMineruOutline(raw, pdf.numPages);
       const parsedTitle = collectMineruDocumentTitle(raw, pdf.numPages);
       if (parsedOutline.length) setOutline(parsedOutline);
       if (parsedTitle) setDetectedDocumentTitle(parsedTitle, true);
-      setMineruRegions(regions); setMineruMarkdown(parsedMarkdown.slice(0, 200_000)); setMineruReady(true);
+      setMineruRegions(regions); setMineruReady(true);
       setLayoutState({ state: "done", message: regions.length ? `阅读体验优化完成：已识别 ${regions.filter((item: VisualRegion) => item.kind === "image").length} 张图片、${regions.filter((item: VisualRegion) => item.kind === "table").length} 个表格与 ${regions.filter((item: VisualRegion) => item.kind === "formula").length} 条公式` : "阅读体验优化完成，未发现可交互结构区域。", progress: 100 });
     } catch (error) {
       const message = error instanceof Error ? error.message : "MINERU_REQUEST_FAILED";
