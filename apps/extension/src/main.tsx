@@ -2600,6 +2600,7 @@ function App() {
     onOpen={paper => void openLibraryPaper(paper)}
     onImportFile={file => { setLibraryOpen(false); void openFile(file); }}
     onImportUrl={async value => { setLibraryOpen(false); await loadPdfUrl(value, true); }}
+    extractText={extractLibraryPaperText}
   />;
 
   if (!pdf) {
