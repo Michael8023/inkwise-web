@@ -30,9 +30,13 @@ async function pptStream(action: "outline" | "content", request: Record<string, 
   if (!response.ok || !response.body) { const payload = await response.json().catch(() => ({})); throw new Error(payload.error || "AI_PPT_STREAM_FAILED"); }
   const reader = response.body.getReader(), decoder = new TextDecoder(); let buffer = "", fullText = "";
   const consume = (raw: string) => {
-    const payload = raw.trim().replace(/^data:\s*/gm, "").trim();
+    // Some upstream gateways wrap an SSE event in another SSE `data:` frame.
+    // Strip every leading prefix before decoding the JSON payload.
+    let payload = raw.trim().replace(/^(?:data:\s*)+/, "").trim();
     if (!payload || payload === "[DONE]") return;
-    const item = JSON.parse(payload); const text = readStreamValue(item);
+    if (!payload.startsWith("{")) { const start = payload.indexOf("{"); if (start < 0) return; payload = payload.slice(start); }
+    let item: any; try { item = JSON.parse(payload); } catch { return; }
+    const text = readStreamValue(item);
     if (text) { fullText += text; onText(fullText); }
     const candidate = item?.pptId || item?.data?.pptId || item?.ppt_id; if (candidate) onPptId(String(candidate));
   };
