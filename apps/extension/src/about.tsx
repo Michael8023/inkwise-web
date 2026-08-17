@@ -15,7 +15,18 @@ const installSteps = { edge: ["下载并解压识谛插件 ZIP 安装包。", "�
 
 export function AboutPage() {
   const [browser, setBrowser] = useState<"edge" | "chrome">("edge"), [menu, setMenu] = useState(false);
-  useEffect(() => { document.title = "识谛 shidea｜AI 驱动的研究阅读空间"; return () => { document.title = "识谛 shidea"; }; }, []);
+  useEffect(() => {
+    document.title = "识谛 shidea｜AI 驱动的研究阅读空间";
+    document.body.classList.add("about-active");
+    window.scrollTo(0, 0);
+    const targets = Array.from(document.querySelectorAll<HTMLElement>(".about-page .section, .about-page .showcase, .about-page .closing"));
+    targets.forEach(target => target.classList.add("about-reveal"));
+    const observer = new IntersectionObserver(entries => entries.forEach(entry => {
+      if (entry.isIntersecting) { entry.target.classList.add("is-visible"); observer.unobserve(entry.target); }
+    }), { threshold: 0.12 });
+    targets.forEach(target => observer.observe(target));
+    return () => { observer.disconnect(); document.body.classList.remove("about-active"); document.title = "识谛 shidea"; };
+  }, []);
   const date = new Intl.DateTimeFormat("zh-CN", { dateStyle: "long" }).format(new Date(__SHIDEA_RELEASE_DATE__)); const browserUrl = browser === "edge" ? "edge://extensions" : "chrome://extensions";
   return <main className="about-page"><header className="about-nav"><a className="about-brand" href="/"><img src="/brand/shidea-mark.png" alt="识谛"/>识谛 <em>shidea</em></a><button className="about-menu" aria-label="展开导航" onClick={() => setMenu(!menu)}><ChevronDown size={18}/></button><nav className={menu ? "open" : ""}><a href="#capabilities">产品能力</a><a href="#plans">产品方案</a><a href="#install">安装教程</a><a href="#start">使用方式</a></nav><div className="nav-actions"><a href="/">打开识谛</a><a href={downloadUrl} download><Download size={14}/>下载插件</a></div></header>
     <section className="about-hero"><div><p className="eyebrow">SHIDEA · AI RESEARCH READING</p><h1>把阅读变成<br/><span>研究的下一步。</span></h1><p className="lede">识谛将 PDF 阅读、文献管理与 AI 思考放在同一个安静的工作空间。读懂每一页，也让每一次理解自然沉淀为下一步行动。</p><div className="actions"><a className="button primary" href="/">打开识谛 <ArrowRight size={17}/></a><a className="button" href={downloadUrl} download><Download size={16}/>下载 Edge / Chrome 插件</a></div><small className="release-note">插件 v{__SHIDEA_EXTENSION_VERSION__} · ZIP 安装包 · 更新于 {date}</small></div><div className="hero-visual"><ReaderPreview/></div></section>
