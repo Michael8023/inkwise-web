@@ -511,7 +511,7 @@ function OrdersDialog({ onClose }: { onClose: () => void }) {
   return <div className="auth-backdrop"><section className="auth-dialog orders-dialog"><button type="button" className="dialog-back" onClick={onClose} aria-label="返回个人中心"><ChevronLeft size={18}/></button><button type="button" className="popover-close" onClick={onClose} aria-label="关闭"><X size={16}/></button><div className="auth-brand"><img src="/brand/shidea-mark.png" alt=""/><span>识谛 <em>shidea</em></span></div><div className="auth-heading"><h2>我的订单</h2><p>查看已兑换到账的积分与 Pro 权益。</p></div>{loading ? <p className="orders-empty">正在加载兑换记录…</p> : error ? <p className="auth-feedback error">{error}</p> : orders.length ? <div className="order-list">{orders.map((order, index) => <article key={`${order.product_code}-${order.redeemed_at}-${index}`}><div><strong>{redemptionLabels[order.product_code] || order.product_code}</strong><span>{new Date(order.redeemed_at).toLocaleString("zh-CN", { dateStyle: "medium", timeStyle: "short" })}</span></div><div><b>{order.product_type === "pro_month" ? `Pro ${order.duration_days || 30} 天` : `+${order.credits || 0} 积分`}</b><em className="order-status paid">已兑换</em></div></article>)}</div> : <p className="orders-empty">还没有兑换记录。</p>}<small className="orders-note">记录会在兑换码成功核销后立即显示。</small></section></div>;
 }
 
-function AccountDialog({ session, usage, inviteCode, onClose, onSignOut, onOpenLibrary, onOpenFeedback, onOpenPurchase }: { session: AuthSession; usage: Usage | null; inviteCode: string; onClose: () => void; onSignOut: () => void; onOpenLibrary: () => void; onOpenFeedback: () => void; onOpenPurchase: () => void }) {
+function AccountDialog({ session, usage, inviteCode, onClose, onSignOut, onOpenFeedback, onOpenPurchase }: { session: AuthSession; usage: Usage | null; inviteCode: string; onClose: () => void; onSignOut: () => void; onOpenFeedback: () => void; onOpenPurchase: () => void }) {
   const displayName = String(session.user.user_metadata?.display_name || session.user.user_metadata?.username || "识谛用户");
   const initial = displayName.trim().slice(0, 1).toUpperCase() || "I";
   const creditAmount = usage?.creditsRemaining ?? 0;
@@ -529,7 +529,6 @@ function AccountDialog({ session, usage, inviteCode, onClose, onSignOut, onOpenL
     <div className="quota-summary"><span>当前套餐<strong>{usage?.plan ? usage.plan.toUpperCase() : "FREE"}</strong></span><span>{usage?.plan === "pro" ? "有效至" : "AI 调用"}<strong>{usage?.plan === "pro" && usage.periodEnd ? new Date(usage.periodEnd).toLocaleDateString("zh-CN", { month: "short", day: "numeric" }) : usage?.plan === "pro" ? "—" : "2 分 / 次"}</strong></span></div>
     <section className="account-invite"><span>我的邀请码</span><strong>{inviteCode || "正在生成…"}</strong><small>好友注册时填写，即可获得后台设置的新人奖励。</small><div className="account-invite-actions"><button type="button" disabled={!inviteCode} onClick={() => void copyInvite("code")}><Copy size={13}/>{inviteCopied === "code" ? "已复制" : "复制邀请码"}</button><button type="button" disabled={!inviteLink} onClick={() => void copyInvite("link")}><Link2 size={13}/>{inviteCopied === "link" ? "已复制" : "复制邀请链接"}</button></div></section>
     <div className="account-actions">
-      <button type="button" className="account-action" onClick={onOpenLibrary}><span className="account-action-icon"><FolderOpen size={18}/></span><span><small>文献工作台</small><strong>管理我的文献与研究资料</strong></span><ChevronRight size={17}/></button>
       <button type="button" className="account-action" onClick={() => setOrdersOpen(true)}><span className="account-action-icon"><FileText size={18}/></span><span><small>交易记录</small><strong>我的订单</strong></span><ChevronRight size={17}/></button>
       <button type="button" className="account-action" onClick={onOpenFeedback}><span className="account-action-icon"><MessageSquare size={18}/></span><span><small>共创识谛</small><strong>提交反馈与建议</strong></span><ChevronRight size={17}/></button>
     </div>
@@ -704,10 +703,7 @@ function WelcomeScreen({
           <img src="/brand/shidea-mark.png" alt="识谛 shidea" />
           <span>识谛</span><em>shidea</em>
         </div>
-        <button className="welcome-account" onClick={onOpenAccount}>
-          {session ? <UserRound size={16} /> : <LogIn size={16} />}
-          {session ? "个人中心" : "登录"}
-        </button>
+        <div className="welcome-nav-actions"><button className="welcome-workspace-nav" onClick={onOpenLibrary}><FolderOpen size={16}/>文献工作台</button><button className="welcome-account" onClick={onOpenAccount}>{session ? <UserRound size={16} /> : <LogIn size={16} />}{session ? "个人中心" : "登录"}</button></div>
       </header>
       <section className="welcome-stage">
         <div className="welcome-copy">
@@ -715,7 +711,6 @@ function WelcomeScreen({
           <div className="welcome-actions">
             <button className="welcome-primary" onClick={onOpenFile}><FolderOpen size={18} />打开本地 PDF</button>
             <button className="welcome-secondary" onClick={onOpenUrl}><Link size={17} />导入论文链接</button>
-            <button className="welcome-workspace" onClick={onOpenLibrary}><FolderOpen size={17} />文献工作台</button>
           </div>
           <button className="welcome-library" onClick={onOpenAccount}><UserRound size={17} />{session ? "查看账户与 AI 额度" : "登录后使用 AI 功能"}</button>
         </div>
@@ -2601,7 +2596,7 @@ function App() {
     onImportFile={file => { setLibraryOpen(false); void openFile(file); }}
     onImportUrl={async value => { setLibraryOpen(false); await loadPdfUrl(value, true); }}
     extractText={extractLibraryPaperText}
-    onOpenAccount={() => setAuthOpen(true)}
+    onOpenAccount={() => { setLibraryOpen(false); setAuthOpen(true); }}
   />;
 
   if (!pdf) {
@@ -2627,7 +2622,7 @@ function App() {
           onOpenLibrary={() => session ? setLibraryOpen(true) : setAuthOpen(true)}
         />
         <input ref={fileInput} className="welcome-file-input" type="file" accept="application/pdf" onChange={(event) => event.target.files?.[0] && openFile(event.target.files[0])} />
-        {authOpen && (session ? <AccountDialog session={session} usage={usage} inviteCode={inviteCode} onClose={() => setAuthOpen(false)} onSignOut={() => { signOut(); setAuthOpen(false); }} onOpenLibrary={() => { setAuthOpen(false); setLibraryOpen(true); }} onOpenFeedback={() => { setAuthOpen(false); setFeedbackOpen(true); }} onOpenPurchase={() => { setAuthOpen(false); setPurchaseOpen(true); }} /> : <AuthDialog mode={authMode} email={authEmail} password={authPassword} passwordConfirm={authPasswordConfirm} name={authName} inviteCode={authInviteCode} code={authCode} error={authError} notice={authNotice} verifying={authVerifying} resetting={authResetting} resetVerifying={authResetVerifying} busy={authBusy} busyLabel={authBusyLabel} onClose={() => setAuthOpen(false)} onSubmit={submitAuth} onVerify={verifyEmailCode} onResend={resendEmailCode} onResetRequest={requestPasswordReset} onResetVerify={resetPassword} onResetResend={requestPasswordReset} onOpenReset={beginPasswordReset} onBackToLogin={backToLogin} onModeChange={(nextMode) => { setAuthMode(nextMode); setAuthVerifying(false); setAuthResetting(false); setAuthResetVerifying(false); setAuthError(""); setAuthNotice(""); }} onEmail={setAuthEmail} onPassword={setAuthPassword} onPasswordConfirm={setAuthPasswordConfirm} onName={setAuthName} onInviteCode={setAuthInviteCode} onCode={setAuthCode} />)}
+        {authOpen && (session ? <AccountDialog session={session} usage={usage} inviteCode={inviteCode} onClose={() => setAuthOpen(false)} onSignOut={() => { signOut(); setAuthOpen(false); }} onOpenFeedback={() => { setAuthOpen(false); setFeedbackOpen(true); }} onOpenPurchase={() => { setAuthOpen(false); setPurchaseOpen(true); }} /> : <AuthDialog mode={authMode} email={authEmail} password={authPassword} passwordConfirm={authPasswordConfirm} name={authName} inviteCode={authInviteCode} code={authCode} error={authError} notice={authNotice} verifying={authVerifying} resetting={authResetting} resetVerifying={authResetVerifying} busy={authBusy} busyLabel={authBusyLabel} onClose={() => setAuthOpen(false)} onSubmit={submitAuth} onVerify={verifyEmailCode} onResend={resendEmailCode} onResetRequest={requestPasswordReset} onResetVerify={resetPassword} onResetResend={requestPasswordReset} onOpenReset={beginPasswordReset} onBackToLogin={backToLogin} onModeChange={(nextMode) => { setAuthMode(nextMode); setAuthVerifying(false); setAuthResetting(false); setAuthResetVerifying(false); setAuthError(""); setAuthNotice(""); }} onEmail={setAuthEmail} onPassword={setAuthPassword} onPasswordConfirm={setAuthPasswordConfirm} onName={setAuthName} onInviteCode={setAuthInviteCode} onCode={setAuthCode} />)}
         {purchaseOpen && <PurchaseDialog busy={purchaseBusy} error={purchaseError} onClose={() => { setPurchaseOpen(false); setPurchaseError(""); }} onBack={() => { setPurchaseOpen(false); setAuthOpen(true); }} onPurchase={purchaseCredits} />}
         {urlOpen && <UrlImportDialog value={paperUrl} error={urlError} loading={urlLoading} onChange={value => { setPaperUrl(value); setUrlError(""); }} onClose={() => setUrlOpen(false)} onSubmit={openPdfUrl} />}
         {!embeddedReader && <ExtensionAutoOpenToggle />}
@@ -2755,6 +2750,9 @@ function App() {
           >
             <PanelRight size={18} />
           </IconButton>
+          <button className="account-trigger workspace-trigger" onClick={() => session ? setLibraryOpen(true) : setAuthOpen(true)}>
+            <FolderOpen size={17} /><span>文献工作台</span>
+          </button>
           <button className="account-trigger" onClick={() => setAuthOpen(true)}>
             {session ? <UserRound size={17} /> : <LogIn size={17} />}<span>{session ? "个人中心" : "登录"}</span>
           </button>
@@ -2990,7 +2988,7 @@ function App() {
         </aside>
       </main>
       <NoticeStack notices={notices} onDismiss={dismissNotice}/>
-      {authOpen && (session ? <AccountDialog session={session} usage={usage} inviteCode={inviteCode} onClose={() => setAuthOpen(false)} onSignOut={() => { signOut(); setAuthOpen(false); }} onOpenLibrary={() => { setAuthOpen(false); setLibraryOpen(true); }} onOpenFeedback={() => { setAuthOpen(false); setFeedbackOpen(true); }} onOpenPurchase={() => { setAuthOpen(false); setPurchaseOpen(true); }} /> : <AuthDialog mode={authMode} email={authEmail} password={authPassword} passwordConfirm={authPasswordConfirm} name={authName} inviteCode={authInviteCode} code={authCode} error={authError} notice={authNotice} verifying={authVerifying} resetting={authResetting} resetVerifying={authResetVerifying} busy={authBusy} busyLabel={authBusyLabel} onClose={() => setAuthOpen(false)} onSubmit={submitAuth} onVerify={verifyEmailCode} onResend={resendEmailCode} onResetRequest={requestPasswordReset} onResetVerify={resetPassword} onResetResend={requestPasswordReset} onOpenReset={beginPasswordReset} onBackToLogin={backToLogin} onModeChange={(nextMode) => { setAuthMode(nextMode); setAuthVerifying(false); setAuthResetting(false); setAuthResetVerifying(false); setAuthError(""); setAuthNotice(""); }} onEmail={setAuthEmail} onPassword={setAuthPassword} onPasswordConfirm={setAuthPasswordConfirm} onName={setAuthName} onInviteCode={setAuthInviteCode} onCode={setAuthCode} />)}
+        {authOpen && (session ? <AccountDialog session={session} usage={usage} inviteCode={inviteCode} onClose={() => setAuthOpen(false)} onSignOut={() => { signOut(); setAuthOpen(false); }} onOpenFeedback={() => { setAuthOpen(false); setFeedbackOpen(true); }} onOpenPurchase={() => { setAuthOpen(false); setPurchaseOpen(true); }} /> : <AuthDialog mode={authMode} email={authEmail} password={authPassword} passwordConfirm={authPasswordConfirm} name={authName} inviteCode={authInviteCode} code={authCode} error={authError} notice={authNotice} verifying={authVerifying} resetting={authResetting} resetVerifying={authResetVerifying} busy={authBusy} busyLabel={authBusyLabel} onClose={() => setAuthOpen(false)} onSubmit={submitAuth} onVerify={verifyEmailCode} onResend={resendEmailCode} onResetRequest={requestPasswordReset} onResetVerify={resetPassword} onResetResend={requestPasswordReset} onOpenReset={beginPasswordReset} onBackToLogin={backToLogin} onModeChange={(nextMode) => { setAuthMode(nextMode); setAuthVerifying(false); setAuthResetting(false); setAuthResetVerifying(false); setAuthError(""); setAuthNotice(""); }} onEmail={setAuthEmail} onPassword={setAuthPassword} onPasswordConfirm={setAuthPasswordConfirm} onName={setAuthName} onInviteCode={setAuthInviteCode} onCode={setAuthCode} />)}
       {purchaseOpen && <PurchaseDialog busy={purchaseBusy} error={purchaseError} onClose={() => { setPurchaseOpen(false); setPurchaseError(""); }} onBack={() => { setPurchaseOpen(false); setAuthOpen(true); }} onPurchase={purchaseCredits} />}
       {urlOpen && <UrlImportDialog value={paperUrl} error={urlError} loading={urlLoading} onChange={value => { setPaperUrl(value); setUrlError(""); }} onClose={() => setUrlOpen(false)} onSubmit={openPdfUrl} />}
       {!embeddedReader && <ExtensionAutoOpenToggle />}

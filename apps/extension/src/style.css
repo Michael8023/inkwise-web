@@ -428,6 +428,9 @@ button {
 .welcome-wordmark em { color: #078b8e; font-size: 16px; font-style: normal; font-weight: 700; letter-spacing: 0; }
 .welcome-account { display: inline-flex; align-items: center; gap: 8px; border: 1px solid #b9e2de; border-radius: 10px; background: rgb(255 255 255 / .88); box-shadow: 0 5px 15px rgb(6 52 119 / .08); color: #063477; padding: 11px 15px; font-size: 15px; font-weight: 700; cursor: pointer; transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease, color .18s ease; }
 .welcome-account:hover { border-color: #19beb5; box-shadow: 0 9px 22px rgb(7 139 142 / .16); color: #078b8e; transform: translateY(-2px); }
+.welcome-nav-actions { display: flex; align-items: center; gap: 9px; }
+.welcome-workspace-nav { display: inline-flex; align-items: center; gap: 7px; border: 1px solid #b9e2de; border-radius: 10px; background: rgb(255 255 255 / .88); box-shadow: 0 5px 15px rgb(6 52 119 / .08); color: #31536b; padding: 11px 15px; font-size: 14px; font-weight: 700; cursor: pointer; transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease, color .18s ease; }
+.welcome-workspace-nav:hover { border-color: #19beb5; box-shadow: 0 9px 22px rgb(7 139 142 / .16); color: #078b8e; transform: translateY(-2px); }
 .welcome-stage { min-height: calc(100vh - 128px); display: grid; grid-template-columns: minmax(300px, .94fr) minmax(360px, 1.06fr); align-items: center; gap: clamp(32px, 8vw, 130px); padding: 56px 2vw; }
 .welcome-copy { max-width: 540px; }
 .welcome-eyebrow { margin: 0 0 18px; color: #078b8e; font-size: 11px; font-weight: 700; letter-spacing: 1.7px; }
