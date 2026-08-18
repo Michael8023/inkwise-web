@@ -43,12 +43,16 @@ Deno.serve(async (req) => {
   const preflightResponse = preflight(req); if (preflightResponse) return preflightResponse;
   try {
     const currentUser = await user(req);
-    await rateLimit(currentUser.id, "ai_ppt", 10);
     const input = await body(req);
     const action = clean(input.action, 20) as Action;
     if (!Object.hasOwn(paths, action)) throw new Error("PPT_ACTION_INVALID");
     const request = input.request && typeof input.request === "object" ? input.request as Record<string, unknown> : {};
     const isPptTaskStart = action === "content" && Boolean(request.asyncGenPptx);
+    // Only generation requests consume the short request window. Status polling
+    // and the final download are part of the same job and must remain callable.
+    if (action === "outline" || action === "content" || action === "direct" || action === "markdown") {
+      await rateLimit(currentUser.id, "ai_ppt", 10);
+    }
     const billingRequestId = clean(request.billingRequestId, 160);
     if (isPptTaskStart && !billingRequestId) throw new Error("PPT_BILLING_REQUEST_REQUIRED");
     if (isPptTaskStart) {
