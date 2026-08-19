@@ -1486,14 +1486,11 @@ body.is-resizing-panel * {
 .popover-result .katex-display,
 .summary-result .katex-display,
 .chat-message .katex-display,
-.brainstorm-result .katex-display { position: relative; max-width: 100%; overflow-x: auto; overflow-y: hidden; padding: 4px 26px 4px 0; }
-.formula-copy { display: inline-grid; width: 18px; height: 18px; place-items: center; margin-left: 3px; border: 0; border-radius: 50%; background: color-mix(in srgb, var(--accent) 12%, var(--surface)); color: var(--accent); padding: 0; vertical-align: middle; opacity: 0; cursor: pointer; transition: opacity .14s ease, background .14s ease, color .14s ease; }
-.katex:hover > .formula-copy,
-.katex:focus-within > .formula-copy,
-.katex-display:hover > .formula-copy,
-.katex-display:focus-within > .formula-copy { opacity: 1; }
+.brainstorm-result .katex-display { position: relative; display: block; max-width: 100%; overflow-x: auto; overflow-y: hidden; margin: 10px 0; border: 1px solid color-mix(in srgb, var(--text) 10%, var(--border)); border-radius: 6px; background: color-mix(in srgb, var(--text) 5%, var(--surface)); padding: 14px 40px 14px 14px; text-align: center; }
+.katex-display > .katex { font-size: 1.14em; }
+.formula-copy { position: absolute; top: 8px; right: 8px; display: grid; width: 24px; height: 24px; place-items: center; border: 0; border-radius: 50%; background: color-mix(in srgb, var(--text) 7%, var(--surface)); color: var(--text-muted); padding: 0; cursor: pointer; transition: background .14s ease, color .14s ease; }
 .formula-copy:hover { background: var(--accent); color: #fff; }
-.katex-display > .formula-copy { position: absolute; top: 4px; right: 2px; margin-left: 0; }
+.formula-copy.copied { background: color-mix(in srgb, #23a36c 18%, var(--surface)); color: #168253; }
 .panel-empty {
   min-height: 220px;
   display: flex;

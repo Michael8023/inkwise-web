@@ -95,18 +95,21 @@ function normalizeDisplayMath(markdown: string) {
   return markdown.replace(/(^|\n)\$\$\s*([^\n]+?)\s*\$\$(?=\n|$)/g, (_match, prefix, source) => `${prefix}$$\n${source.trim()}\n$$`);
 }
 
+function FormulaSpan({ node, children, dataFormulaSource: _source, dataFormulaDisplay: _display, ...props }: any) {
+  const source = typeof node?.properties?.dataFormulaSource === "string" ? node.properties.dataFormulaSource : "";
+  const display = node?.properties?.dataFormulaDisplay === "true";
+  const [copied, setCopied] = useState(false);
+  if (!source || !display) return <span {...props}>{children}</span>;
+  const markdown = `$$\n${source}\n$$`;
+  return <span {...props}>{children}<button type="button" className={`formula-copy${copied ? " copied" : ""}`} aria-label={copied ? "公式 Markdown 已复制" : "复制公式 Markdown"} title={copied ? "已复制" : "复制公式 Markdown"} onClick={(event) => { event.preventDefault(); event.stopPropagation(); void navigator.clipboard.writeText(markdown).then(() => { setCopied(true); window.setTimeout(() => setCopied(false), 1600); }).catch(() => undefined); }}>{copied ? <Check size={13}/> : <Copy size={13}/>}</button></span>;
+}
+
 function AiMarkdown({ children }: { children: string }) {
   return <ReactMarkdown
     remarkPlugins={[remarkMath]}
     rehypePlugins={[rehypeKatex, rehypeFormulaMetadata]}
     components={{
-      span: ({ node, children: spanChildren, dataFormulaSource: _source, dataFormulaDisplay: _display, ...props }: any) => {
-        const source = typeof node?.properties?.dataFormulaSource === "string" ? node.properties.dataFormulaSource : "";
-        const display = node?.properties?.dataFormulaDisplay === "true";
-        if (!source) return <span {...props}>{spanChildren}</span>;
-        const markdown = display ? `$$\n${source}\n$$` : `$${source}$`;
-        return <span {...props}>{spanChildren}<button type="button" className="formula-copy" aria-label="复制公式 Markdown" title="复制公式 Markdown" onClick={(event) => { event.preventDefault(); event.stopPropagation(); void navigator.clipboard.writeText(markdown); }}><Copy size={12}/></button></span>;
-      },
+      span: FormulaSpan,
     }}
   >{normalizeDisplayMath(children)}</ReactMarkdown>;
 }
