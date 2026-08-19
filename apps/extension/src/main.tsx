@@ -60,8 +60,55 @@ import { AboutPage } from "./about";
 import { RedeemPage } from "./redeem";
 import { mountRedemptionAdmin } from "./redemption-admin";
 
+function formulaSource(node: any): string {
+  if (node?.type === "element" && node.tagName === "annotation" && node.properties?.encoding === "application/x-tex") {
+    return (node.children || []).map((child: any) => child.value || "").join("");
+  }
+  for (const child of node?.children || []) {
+    const source = formulaSource(child);
+    if (source) return source;
+  }
+  return "";
+}
+
+function rehypeFormulaMetadata() {
+  return (tree: any) => {
+    const visit = (node: any) => {
+      const classes = Array.isArray(node?.properties?.className) ? node.properties.className : [];
+      const isDisplay = classes.includes("katex-display");
+      const isInline = !isDisplay && classes.includes("katex");
+      if (isDisplay || isInline) {
+        const source = formulaSource(node);
+        if (source) {
+          node.properties.dataFormulaSource = source;
+          node.properties.dataFormulaDisplay = isDisplay ? "true" : "false";
+        }
+        return;
+      }
+      for (const child of node?.children || []) visit(child);
+    };
+    visit(tree);
+  };
+}
+
+function normalizeDisplayMath(markdown: string) {
+  return markdown.replace(/(^|\n)\$\$\s*([^\n]+?)\s*\$\$(?=\n|$)/g, (_match, prefix, source) => `${prefix}$$\n${source.trim()}\n$$`);
+}
+
 function AiMarkdown({ children }: { children: string }) {
-  return <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{children}</ReactMarkdown>;
+  return <ReactMarkdown
+    remarkPlugins={[remarkMath]}
+    rehypePlugins={[rehypeKatex, rehypeFormulaMetadata]}
+    components={{
+      span: ({ node, children: spanChildren, dataFormulaSource: _source, dataFormulaDisplay: _display, ...props }: any) => {
+        const source = typeof node?.properties?.dataFormulaSource === "string" ? node.properties.dataFormulaSource : "";
+        const display = node?.properties?.dataFormulaDisplay === "true";
+        if (!source) return <span {...props}>{spanChildren}</span>;
+        const markdown = display ? `$$\n${source}\n$$` : `$${source}$`;
+        return <span {...props}>{spanChildren}<button type="button" className="formula-copy" aria-label="复制公式 Markdown" title="复制公式 Markdown" onClick={(event) => { event.preventDefault(); event.stopPropagation(); void navigator.clipboard.writeText(markdown); }}><Copy size={12}/></button></span>;
+      },
+    }}
+  >{normalizeDisplayMath(children)}</ReactMarkdown>;
 }
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
