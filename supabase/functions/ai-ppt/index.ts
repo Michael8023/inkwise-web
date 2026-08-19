@@ -1,5 +1,5 @@
 import { corsHeaders, preflight } from "../_shared/cors.ts";
-import { admin, body, json, rateLimit, refund, user } from "../_shared/core.ts";
+import { admin, body, json, rateLimit, refund, settle, user } from "../_shared/core.ts";
 
 type Action = "direct" | "outline" | "content" | "markdown" | "status" | "download";
 
@@ -27,6 +27,65 @@ function responseData(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object") return {};
   const root = value as Record<string, unknown>;
   return (root.data && typeof root.data === "object" ? root.data : root) as Record<string, unknown>;
+}
+
+function pptIdFromEvent(raw: string) {
+  const data = raw.split(/\r?\n/).find(line => line.startsWith("data:"))?.slice(5).trim();
+  if (!data || data === "[DONE]") return "";
+  try {
+    const payload = JSON.parse(data) as Record<string, unknown>;
+    const nested = responseData(payload);
+    return clean(payload.pptId || payload.ppt_id || nested.pptId || nested.ppt_id || nested.id, 300);
+  } catch { return ""; }
+}
+
+function trackedStream(upstream: Response, userId: string, billingRequestId: string) {
+  const reader = upstream.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "", upstreamPptId = "", outputChars = 0, jobSaved = false;
+  const saveJob = async () => {
+    if (!upstreamPptId || jobSaved) return;
+    const { error } = await admin().from("ppt_jobs").upsert({
+      user_id: userId, billing_request_id: billingRequestId, upstream_ppt_id: upstreamPptId,
+      status: "generating", updated_at: new Date().toISOString(),
+    }, { onConflict: "upstream_ppt_id" });
+    if (error) throw error;
+    jobSaved = true;
+  };
+  return new ReadableStream<Uint8Array>({
+    async start(controller) {
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (value) {
+            controller.enqueue(value);
+            const text = decoder.decode(value, { stream: true });
+            outputChars += text.length;
+            buffer += text;
+            const events = buffer.split(/\r?\n\r?\n/);
+            buffer = events.pop() || "";
+            for (const event of events) {
+              upstreamPptId ||= pptIdFromEvent(event);
+              await saveJob();
+            }
+          }
+        }
+        if (buffer) upstreamPptId ||= pptIdFromEvent(buffer);
+        if (!upstreamPptId) throw new Error("PPT_TASK_ID_MISSING");
+        await saveJob();
+        await settle(billingRequestId, outputChars);
+        controller.close();
+      } catch (error) {
+        await refund(billingRequestId, error instanceof Error ? error.message : "PPT_STREAM_FAILED");
+        controller.error(error);
+      }
+    },
+    async cancel() {
+      await reader.cancel();
+      await refund(billingRequestId, "PPT_STREAM_CANCELLED");
+    },
+  });
 }
 
 function upstreamRequest(action: Action, request: Record<string, unknown>) {
@@ -71,8 +130,17 @@ Deno.serve(async (req) => {
     const apiKey = Deno.env.get("APILIO_API_KEY");
     if (!apiKey) throw new Error("APILIO_NOT_CONFIGURED");
     const wantsStream = Boolean(request.stream) && (action === "outline" || action === "content");
-    const target = action === "status" && request.pptId
-      ? `${urlFor(baseUrl, paths[action])}?pptId=${encodeURIComponent(String(request.pptId))}`
+    let upstreamTaskId = "";
+    if (action === "status" || action === "download") {
+      const suppliedId = clean(action === "status" ? request.pptId : request.id, 300);
+      if (!suppliedId) throw new Error("PPT_TASK_ID_REQUIRED");
+      const { data: job, error } = await admin().from("ppt_jobs").select("upstream_ppt_id")
+        .eq("user_id", currentUser.id).eq("upstream_ppt_id", suppliedId).maybeSingle();
+      if (error || !job) throw new Error("PPT_TASK_NOT_FOUND");
+      upstreamTaskId = job.upstream_ppt_id;
+    }
+    const target = action === "status"
+      ? `${urlFor(baseUrl, paths[action])}?pptId=${encodeURIComponent(upstreamTaskId)}`
       : urlFor(baseUrl, paths[action]);
     const upstream = await fetch(target, {
       method: action === "status" ? "GET" : "POST",
@@ -85,10 +153,18 @@ Deno.serve(async (req) => {
       throw new Error(`DOCMEE_UPSTREAM_${upstream.status}${detail ? `:${detail}` : ""}`);
     }
     if (wantsStream && upstream.body) {
-      return new Response(upstream.body, { headers: { ...corsHeaders, "Content-Type": "text/event-stream", "Cache-Control": "no-cache" } });
+      const body = isPptTaskStart ? trackedStream(upstream, currentUser.id, billingRequestId) : upstream.body;
+      return new Response(body, { headers: { ...corsHeaders, "Content-Type": "text/event-stream", "Cache-Control": "no-cache" } });
     }
     const payload = await upstream.json().catch(() => ({}));
     const data = responseData(payload);
+    if (upstreamTaskId && (action === "status" || action === "download")) {
+      await admin().from("ppt_jobs").update({
+        status: data.fileUrl || data.file_url || data.downloadUrl || data.url ? "completed" : "generating",
+        file_url: clean(data.fileUrl || data.file_url || data.downloadUrl || data.url, 2000) || null,
+        updated_at: new Date().toISOString(),
+      }).eq("user_id", currentUser.id).eq("upstream_ppt_id", upstreamTaskId);
+    }
     return json({
       data: payload,
       fileUrl: clean(data.fileUrl || data.file_url || data.downloadUrl || data.url, 2000) || undefined,

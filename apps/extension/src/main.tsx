@@ -44,6 +44,9 @@ import {
   StickyNote,
   FilePlus2,
   Brain,
+  Palette,
+  Quote,
+  Wrench,
   Link2,
   KeyRound,
 } from "lucide-react";
@@ -108,6 +111,7 @@ type LayoutState = { state: "idle" | "preparing" | "uploading" | "processing" | 
 type Tab = "summary" | "chat" | "history";
 type OutlineItem = { title: string; dest?: unknown; pageNumber?: number; items?: OutlineItem[] };
 type ChatMessage = { role: "user" | "assistant"; content: string };
+type PaletteColor = { r: number; g: number; b: number; count: number; share: number };
 type AuthSession = { user: { id: string; email?: string; user_metadata?: Record<string, unknown> } };
 type Usage = { plan: string; creditsRemaining: number; periodEnd: string | null };
 type AppNotice = { id: string; message: string; tone: "success" | "error" | "info"; leaving?: boolean };
@@ -115,6 +119,24 @@ async function consumeAiStream(response: Response, onDelta: (delta: string) => v
   if (!response.ok || !response.body) { const payload = await response.json().catch(() => ({})); throw new Error(payload.error || "AI_STREAM_FAILED"); }
   const reader = response.body.getReader(), decoder = new TextDecoder(); let buffer = "";
   while (true) { const { done, value } = await reader.read(); if (done) break; buffer += decoder.decode(value, { stream: true }); const events = buffer.split("\n\n"); buffer = events.pop() || ""; for (const rawEvent of events) { const line = rawEvent.split("\n").find(item => item.startsWith("data:")); if (!line) continue; const payload = JSON.parse(line.slice(5).trim()); if (payload.error) throw new Error(payload.error); if (payload.delta) onDelta(String(payload.delta)); } }
+}
+async function extractImagePalette(imageDataUrl: string): Promise<PaletteColor[]> {
+  const image = new Image();
+  await new Promise<void>((resolve, reject) => { image.onload = () => resolve(); image.onerror = () => reject(new Error("IMAGE_INVALID")); image.src = imageDataUrl; });
+  const canvas = document.createElement("canvas");
+  const scale = Math.min(1, 160 / Math.max(image.naturalWidth, image.naturalHeight));
+  canvas.width = Math.max(1, Math.round(image.naturalWidth * scale)); canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) throw new Error("IMAGE_INVALID");
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+  const buckets = new Map<string, number>(); let opaque = 0;
+  for (let index = 0; index < pixels.length; index += 4) {
+    if (pixels[index + 3] < 180) continue;
+    const r = Math.min(255, Math.round(pixels[index] / 16) * 16), g = Math.min(255, Math.round(pixels[index + 1] / 16) * 16), b = Math.min(255, Math.round(pixels[index + 2] / 16) * 16);
+    buckets.set(`${r},${g},${b}`, (buckets.get(`${r},${g},${b}`) || 0) + 1); opaque += 1;
+  }
+  return [...buckets.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([key, count]) => { const [r, g, b] = key.split(",").map(Number); return { r, g, b, count, share: opaque ? count / opaque : 0 }; });
 }
 async function extractLibraryPaperText(paper: LibraryPaper) {
   const download = await supabase.storage.from("library-pdfs").download(paper.storage_path);
@@ -131,6 +153,8 @@ async function extractLibraryPaperText(paper: LibraryPaper) {
 const PUBLIC_READER_ORIGIN = "https://www.inkwise.site";
 const MAX_PDF_IMPORT_BYTES = 128 * 1024 * 1024;
 const MAX_LIBRARY_PDF_BYTES = 50 * 1024 * 1024;
+const FREE_MINERU_UPLOAD_BYTES = 15 * 1024 * 1024;
+const PRO_MINERU_UPLOAD_BYTES = 50 * 1024 * 1024;
 
 async function contentHash(bytes: ArrayBuffer) {
   const digest = await crypto.subtle.digest("SHA-256", bytes);
@@ -428,7 +452,9 @@ const apiErrors: Record<string, string> = {
   AI_VISUAL_FAILED: "图表识别失败，请稍后重试。",
   AI_UPSTREAM_TIMEOUT: "AI 图表分析超时，额度已退回，请稍后重试或切换模型。",
   REQUEST_TIMEOUT: "请求超时，请检查网络后重试。",
-  MINERU_FILE_TOO_LARGE: "当前 PDF 超过 15MB，暂时无法进行智能版面分析。",
+  MINERU_FILE_TOO_LARGE: "当前 PDF 超过版面优化的文件大小上限。",
+  MINERU_PRO_REQUIRED_FOR_LARGE_FILE: "Free 会员仅支持 15 MB 以内的版面优化；开通 Pro 后可处理最大 50 MB。",
+  MINERU_PRO_FILE_TOO_LARGE: "当前 PDF 超过 Pro 版面优化的 50 MB 上限。",
   MINERU_UPLOAD_FAILED: "文档上传失败，请稍后重试。",
   DOI_PDF_NOT_FOUND: "该 DOI 对应的 PDF 暂时无法获取。我们已尝试出版商官方渠道、Unpaywall 开放获取资源以及 Sci-Hub 镜像，但均未成功。请尝试通过机构访问或手动下载后导入。",
   DOI_PDF_NOT_AVAILABLE: "该 DOI 指向付费文章，自动获取受限。建议：① 通过机构图书馆访问 ② 手动访问 Sci-Hub 镜像（sci-hub.se / sci-hub.st / sci-hub.ru）下载后导入 ③ 联系作者索取预印本。",
@@ -1077,12 +1103,13 @@ function SelectionPopover({
   </>;
 }
 
-function VisualPopover({ selection, pageRef, onClose, onTask, onFollowup }: {
+function VisualPopover({ selection, pageRef, onClose, onTask, onFollowup, onPalette }: {
   selection: VisualSelection;
   pageRef: React.RefObject<HTMLDivElement | null>;
   onClose: (id: string) => void;
   onTask: (selection: VisualSelection, kind: "explain" | "table") => void;
   onFollowup?: (selection: VisualSelection, question: string) => void;
+  onPalette?: (selection: VisualSelection) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState({ left: -9999, top: -9999 });
@@ -1111,7 +1138,7 @@ function VisualPopover({ selection, pageRef, onClose, onTask, onFollowup }: {
     <div className="visual-popover-header"><button className="popover-collapse" aria-label={collapsed ? "展开浮窗" : "折叠浮窗"} title={collapsed ? "展开" : "折叠"} onClick={() => setCollapsed(value => !value)}><ChevronDown size={15}/></button><div className="visual-title"><ScanLine size={15}/><strong>图表选区</strong><span>第 {selection.pageNumber} 页</span></div><button className="popover-close" aria-label="关闭" title="关闭" onClick={() => onClose(selection.id)}><X size={15}/></button></div>
     {!collapsed && <div className="visual-popover-scroll">
       <img src={selection.imageDataUrl} alt="框选的 PDF 区域"/>
-      <div className="popover-actions visual-actions"><button onClick={() => onTask(selection, "explain")} disabled={selection.task?.state === "loading"}><ImageIcon size={14}/>AI 解读</button><button onClick={() => onTask(selection, "table")} disabled={selection.task?.state === "loading"}><Table2 size={14}/>提取表格</button><button title="复制图片" onClick={() => copyImage().catch(() => undefined)}><Copy size={14}/></button><a title="下载图片" href={selection.imageDataUrl} download={`shidea-page-${selection.pageNumber}.jpg`}><Download size={14}/></a></div>
+      <div className="popover-actions visual-actions"><button onClick={() => onTask(selection, "explain")} disabled={selection.task?.state === "loading"}><ImageIcon size={14}/>AI 解读</button><button onClick={() => onTask(selection, "table")} disabled={selection.task?.state === "loading"}><Table2 size={14}/>提取表格</button>{onPalette && <button onClick={() => onPalette(selection)}><Palette size={14}/>提取配色</button>}<button title="复制图片" onClick={() => copyImage().catch(() => undefined)}><Copy size={14}/></button><a title="下载图片" href={selection.imageDataUrl} download={`shidea-page-${selection.pageNumber}.jpg`}><Download size={14}/></a></div>
       {selection.task && <div className={`popover-result ${selection.task.state}`}>{selection.task.state === "loading" ? "正在理解图表…" : <><ReactMarkdown>{selection.task.result || ""}</ReactMarkdown>{selection.task.state === "done" && <button className="visual-copy-result" onClick={() => navigator.clipboard.writeText(selection.task?.result || "")}><Copy size={13}/>复制结果</button>}</>}</div>}
       {selection.task?.kind === "explain" && selection.task.state === "done" && <form className="explain-followup" onSubmit={event => { event.preventDefault(); const value=followup.trim(); if (!value || !onFollowup) return; onFollowup(selection,value); setFollowup(""); }}><input value={followup} onChange={event => setFollowup(event.target.value)} placeholder="继续追问这张图…"/><button disabled={!followup.trim()}><Send size={14}/></button></form>}
     </div>}
@@ -1142,6 +1169,7 @@ function PageView({
   onVisualClose,
   onVisualTask,
   onVisualFollowup,
+  onPalette,
   onVisible,
   onNavigate,
 }: {
@@ -1168,6 +1196,7 @@ function PageView({
   onVisualClose: (id: string) => void;
   onVisualTask: (selection: VisualSelection, kind: "explain" | "table") => void;
   onVisualFollowup: (selection: VisualSelection, question: string) => void;
+  onPalette?: (selection: VisualSelection) => void;
   onVisible: (page: number) => void;
   onNavigate: (destination: unknown) => void;
 }) {
@@ -1484,7 +1513,7 @@ function PageView({
             onCollapse={onCollapse}
           />
         ))}
-        {visualSelections.map(selection => <VisualPopover key={selection.id} selection={selection} pageRef={hostRef} onClose={onVisualClose} onTask={onVisualTask} onFollowup={onVisualFollowup}/>)}
+        {visualSelections.map(selection => <VisualPopover key={selection.id} selection={selection} pageRef={hostRef} onClose={onVisualClose} onTask={onVisualTask} onFollowup={onVisualFollowup} onPalette={onPalette}/>)}
       </div>
     </div>
   );
@@ -1508,12 +1537,15 @@ function App() {
   });
   const [tab, setTab] = useState<Tab>("summary");
   const [selections, setSelections] = useState<Selection[]>([]);
-  const [sidePanelTab, setSidePanelTab] = useState<"ai" | "notes" | "brainstorm">("ai");
+  const [sidePanelTab, setSidePanelTab] = useState<"ai" | "notes" | "brainstorm" | "tools">("ai");
   const [activeNoteId, setActiveNoteId] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState("");
   const [highlights, setHighlights] = useState<SavedHighlight[]>([]);
   const [visualMode, setVisualMode] = useState(false);
   const [visualSelections, setVisualSelections] = useState<VisualSelection[]>([]);
+  const [paletteSource, setPaletteSource] = useState<VisualSelection | null>(null);
+  const [paletteColors, setPaletteColors] = useState<PaletteColor[]>([]);
+  const [paletteLoading, setPaletteLoading] = useState(false);
   const [mineruRegions, setMineruRegions] = useState<VisualRegion[]>([]);
   const [mineruReady, setMineruReady] = useState(false);
   const [layoutState, setLayoutState] = useState<LayoutState>({ state: "idle" });
@@ -1525,6 +1557,7 @@ function App() {
   const restoredReaderFor = useRef<string | null>(null);
   const autoLayoutDocument = useRef("");
   const autoSummaryDocument = useRef("");
+  const summaryRequests = useRef(new Set<"short" | "full">());
   const fileInput = useRef<HTMLInputElement>(null);
   const [documentId, setDocumentId] = useState("");
   const [documentText, setDocumentText] = useState("");
@@ -1540,6 +1573,7 @@ function App() {
   const [summaryOpen, setSummaryOpen] = useState({ short: false, full: false });
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [question, setQuestion] = useState("");
+  const [chatQuote, setChatQuote] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
   const [pageInput, setPageInput] = useState("1");
   const [searchOpen, setSearchOpen] = useState(false);
@@ -1636,7 +1670,7 @@ function App() {
   }, []);
   useEffect(() => {
     if (!nativePdfView) return;
-    setVisualMode(false); setSelections([]); setVisualSelections([]); setRailOpen(false); setPanelOpen(false);
+    setVisualMode(false); setSelections([]); setVisualSelections([]); setPaletteSource(null); setPaletteColors([]); setRailOpen(false); setPanelOpen(false);
   }, [nativePdfView]);
   useEffect(() => {
     const currentUrl = new URL(window.location.href);
@@ -1673,26 +1707,31 @@ function App() {
     });
     return () => data.subscription.unsubscribe();
   }, []);
-  useEffect(() => {
-    functionRequest("models")
-      .then((response) => response.json())
-      .then((result) => {
-        const fallbackModels = [
-          { id: "gemini-2.5-flash-lite", name: "Gemini 2.5 Flash Lite" },
-          { id: "gpt-4o-mini", name: "GPT-4o mini" },
-          { id: "grok-4.5", name: "Grok 4.5" },
-          { id: "claude-haiku-4-5-20251001", name: "Claude Haiku 4.5" },
-          { id: "gpt-5.4-nano", name: "GPT-5.4 nano" },
-        ];
-        const availableModels = Array.isArray(result.models) && result.models.length ? result.models : fallbackModels;
-        setModels(availableModels);
-        setModel(result.defaultModel || availableModels[0]?.id || "");
-      })
-      .catch(() => undefined);
-  }, []);
+  useEffect(() => { void refreshModels(); }, []);
   useEffect(() => {
     if (!session) { setUsage(null); return; }
     refreshUsage();
+    void refreshModels();
+  }, [session]);
+  useEffect(() => {
+    if (!session) return;
+    const refreshEntitlement = () => {
+      void refreshUsage();
+      void refreshModels();
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") refreshEntitlement();
+    };
+    const channel = supabase.channel(`user-entitlement:${session.user.id}`)
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "user_entitlements", filter: `user_id=eq.${session.user.id}` }, refreshEntitlement)
+      .subscribe();
+    window.addEventListener("focus", refreshEntitlement);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.removeEventListener("focus", refreshEntitlement);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      void supabase.removeChannel(channel);
+    };
   }, [session]);
   useEffect(() => {
     if (!session || !currentPaperId) return;
@@ -1726,10 +1765,17 @@ function App() {
     void archiveCurrentDocument();
   }, [session, pdf, documentReady, documentId, currentPaperId]);
   useEffect(() => {
-    if (!session || usage?.plan !== "pro" || !paperStateLoaded || !documentReady || !documentId || !model || !documentText || summary.short || summary.full || autoSummaryDocument.current === documentId) return;
-    autoSummaryDocument.current = documentId;
-    void requestSummary("short");
-    void requestSummary("full");
+    if (!session || usage?.plan !== "pro" || !paperStateLoaded || !documentReady || !documentId || !model || !documentText) return;
+    const missingShort = !summary.short;
+    const missingFull = !summary.full;
+    const summaryKey = `${documentId}:pro`;
+    if ((!missingShort && !missingFull) || autoSummaryDocument.current === summaryKey) return;
+    // A document may have been opened before its membership update reached this
+    // tab. Key the one-time automation by plan so existing library papers are
+    // re-evaluated as soon as Pro becomes active.
+    autoSummaryDocument.current = summaryKey;
+    if (missingShort) void requestSummary("short");
+    if (missingFull) void requestSummary("full");
   }, [session, usage?.plan, paperStateLoaded, documentReady, documentId, model, documentText, summary.short, summary.full]);
   useEffect(() => {
     if (!session || !currentPaperId || !documentReady || !paperStateLoaded || libraryHydrating.current) return;
@@ -1743,10 +1789,10 @@ function App() {
     });
   }, [session, currentPaperId, documentTitle]);
   useEffect(() => {
-    if (nativePdfView || !session || !documentReady || !documentId || !paperStateLoaded || mineruReady || autoLayoutDocument.current === documentId) return;
+    if (nativePdfView || !session || !usage || !documentReady || !documentId || !paperStateLoaded || mineruReady || autoLayoutDocument.current === documentId) return;
     autoLayoutDocument.current = documentId;
     void runMineruLayout();
-  }, [nativePdfView, session, documentReady, documentId, paperStateLoaded, mineruReady]);
+  }, [nativePdfView, session, usage, documentReady, documentId, paperStateLoaded, mineruReady]);
   useEffect(() => {
     if (!pdf) return;
     // Open the reader as soon as PDF.js has finished loading it.
@@ -1781,6 +1827,22 @@ function App() {
       if (response.ok) setUsage(await response.json());
     } catch { setUsage(null); }
   }
+  async function refreshModels() {
+    try {
+      const response = await functionRequest("models");
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "MODELS_FAILED");
+      const availableModels: Array<{ id: string; name: string; available?: boolean; tier?: "free" | "pro" }> = Array.isArray(result.models) ? result.models : [];
+      setModels(availableModels);
+      setModel(current => {
+        if (availableModels.some(item => item.id === current && item.available !== false)) return current;
+        return result.defaultModel || availableModels.find(item => item.available !== false)?.id || "";
+      });
+    } catch {
+      // Model availability is refreshed opportunistically. The existing list
+      // remains usable while a transient network failure recovers.
+    }
+  }
   function dismissNotice(id: string) {
     setNotices(items => items.map(item => item.id === id ? { ...item, leaving: true } : item));
     window.setTimeout(() => setNotices(items => items.filter(item => item.id !== id)), 180);
@@ -1789,6 +1851,13 @@ function App() {
     const id = crypto.randomUUID();
     setNotices(items => [...items, { id, message, tone }]);
     window.setTimeout(() => dismissNotice(id), 1820);
+  }
+  function captureChatQuote(event: React.MouseEvent<HTMLDivElement>, message: ChatMessage) {
+    if (message.role !== "assistant") return;
+    const selection = window.getSelection();
+    const text = selection?.toString().trim() || "";
+    if (!text || !event.currentTarget.contains(selection?.anchorNode || null)) return;
+    setChatQuote(text.slice(0, 4000));
   }
   function setDetectedDocumentTitle(value: unknown, replace = false) {
     const title = normalizeDocumentTitle(value);
@@ -1896,8 +1965,11 @@ function App() {
       summary: { short: summary.short, full: summary.full },
     };
     const layoutResult = mineruReady ? { ready: true, regions: mineruRegions, outline, documentTitle: documentTitle || null } : null;
-    const { error } = await supabase.from("library_paper_states").upsert({
-      paper_id: currentPaperId, user_id: session.user.id, reader_state: sanitizeCloudValue(readerState), layout_result: sanitizeCloudValue(layoutResult), updated_at: new Date().toISOString(),
+    const { error } = await supabase.rpc("save_library_paper_state", {
+      p_paper_id: currentPaperId,
+      p_reader_state: sanitizeCloudValue(readerState),
+      p_layout_result: sanitizeCloudValue(layoutResult),
+      p_updated_at: new Date().toISOString(),
     });
     if (error) showNotice("阅读记录同步失败，将在下次修改时重试。", "error");
     else await supabase.from("library_papers").update({ last_opened_at: new Date().toISOString() }).eq("id", currentPaperId);
@@ -2050,7 +2122,7 @@ function App() {
     setCurrentPaperId(options.paperId || "");
     setPaperStateLoaded(!options.paperId);
     importSourceUrl.current = options.sourceUrl || null;
-    setSelections([]); setHighlights([]); setVisualSelections([]); setVisualMode(false); setMineruRegions([]); setMineruReady(false); detectedDocumentTitle.current = ""; setDocumentTitle(""); setLayoutState({ state: "idle" }); autoLayoutDocument.current = "";
+    setSelections([]); setHighlights([]); setVisualSelections([]); setPaletteSource(null); setPaletteColors([]); setVisualMode(false); setMineruRegions([]); setMineruReady(false); detectedDocumentTitle.current = ""; setDocumentTitle(""); setLayoutState({ state: "idle" }); autoLayoutDocument.current = "";
     setDocumentReady(false); setDocumentText(""); setPdf(null); setOutline([]);
     setFileName(name);
     setSummary({}); setSummaryOpen({ short: false, full: false });
@@ -2171,10 +2243,19 @@ function App() {
   }
   async function runMineruLayout() {
     if (!pdf || !pdfBytes.current || layoutState.state === "preparing" || layoutState.state === "uploading" || layoutState.state === "processing" || layoutState.state === "downloading") return;
+    if (!usage) {
+      setLayoutState({ state: "error", message: "正在确认会员权益，请稍后重试版面优化。" });
+      return;
+    }
+    const mineruLimit = usage?.plan === "pro" ? PRO_MINERU_UPLOAD_BYTES : FREE_MINERU_UPLOAD_BYTES;
+    if (pdfBytes.current.byteLength > mineruLimit) {
+      setLayoutState({ state: "error", message: usage?.plan === "pro" ? "该 PDF 超过 Pro 版面优化的 50 MB 上限；普通阅读和 AI 功能不受影响。" : "Free 版面优化仅支持 15 MB 以内的 PDF；开通 Pro 后可处理最大 50 MB。" });
+      return;
+    }
     try {
       const bytes = pdfBytes.current;
       setLayoutState({ state: "preparing", message: "正在优化您的阅读体验…", progress: 4 });
-      const preparedResponse = await functionRequest("mineru-layout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "prepare", name: fileName || "document.pdf" }) });
+      const preparedResponse = await functionRequest("mineru-layout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "prepare", name: fileName || "document.pdf", fileSize: bytes.byteLength }) });
       const prepared = await preparedResponse.json(); if (!preparedResponse.ok) throw new Error(prepared.error || "MINERU_PREPARE_FAILED");
       setLayoutState({ state: "uploading", message: "正在优化您的阅读体验（准备文档）…", progress: 8 });
       await new Promise<void>((resolve, reject) => {
@@ -2189,6 +2270,10 @@ function App() {
         uploadTarget.searchParams.set("target", prepared.uploadUrl);
         uploadTarget.searchParams.set("headers", btoa(JSON.stringify(prepared.uploadHeaders || {})));
         request.open("PUT", uploadTarget.toString());
+        void supabase.auth.getSession().then(({ data }) => {
+          if (data.session?.access_token) request.setRequestHeader("Authorization", `Bearer ${data.session.access_token}`);
+          request.send(bytes);
+        }).catch(() => request.send(bytes));
         request.upload.onprogress = event => {
           if (event.lengthComputable) setLayoutState({ state: "uploading", message: `正在优化您的阅读体验（准备文档 ${Math.round(event.loaded / event.total * 100)}%）`, progress: 8 + Math.round(event.loaded / event.total * 32) });
         };
@@ -2202,7 +2287,6 @@ function App() {
             reject(new Error(`MINERU_UPLOAD_FAILED_${request.status}`));
           }
         };
-        request.send(bytes);
       });
       setLayoutState({ state: "processing", message: "正在优化您的阅读体验（理解页面结构）…", progress: 40 });
       let status: any;
@@ -2336,7 +2420,8 @@ function App() {
     await loadPdfUrl(paperUrl, true);
   }
   async function requestSummary(kind: "short" | "full") {
-    if (!documentReady || !model || !documentId) return;
+    if (!documentReady || !model || !documentId || summaryRequests.current.has(kind)) return;
+    summaryRequests.current.add(kind);
     setSummary((current) => ({ ...current, loading: kind }));
     try {
       if (!session) throw new Error("AUTH_REQUIRED");
@@ -2358,6 +2443,8 @@ function App() {
         loading: undefined,
         [kind]: readableApiError(error, "摘要生成失败，请稍后重试。"),
       }));
+    } finally {
+      summaryRequests.current.delete(kind);
     }
   }
   function addSelection(selection: Omit<Selection, "id">) {
@@ -2370,8 +2457,15 @@ function App() {
   function addVisualSelection(selection: Omit<VisualSelection, "id">) {
     const next = { ...selection, id: crypto.randomUUID() };
     setVisualSelections(items => [...items, next]);
+    if (sidePanelTab === "tools") void selectPaletteSource(next);
     setVisualMode(false);
     return next;
+  }
+  async function selectPaletteSource(selection: VisualSelection) {
+    setPaletteSource(selection); setPaletteColors([]); setPaletteLoading(true);
+    try { setPaletteColors(await extractImagePalette(selection.imageDataUrl)); }
+    catch { showNotice("无法读取这块图像，请重新框选。", "error"); }
+    finally { setPaletteLoading(false); }
   }
   async function runVisualTask(selection: VisualSelection, kind: "explain" | "table") {
     setVisualSelections(items => items.map(item => item.id === selection.id ? { ...item, task: { kind, state: "loading" } } : item));
@@ -2429,12 +2523,15 @@ function App() {
   async function askQuestion() {
     const currentQuestion = question.trim();
     if (!currentQuestion || !documentReady || !model || chatLoading) return;
+    const referenced = chatQuote.trim();
     setQuestion("");
-    setMessages((current) => [...current, { role: "user", content: currentQuestion }]);
+    setChatQuote("");
+    const userContent = referenced ? `引用 AI 回答：\n> ${referenced.replace(/\n/g, "\n> ")}\n\n追问：${currentQuestion}` : currentQuestion;
+    setMessages((current) => [...current, { role: "user", content: userContent }]);
     setChatLoading(true);
     try {
       if (!session) throw new Error("AUTH_REQUIRED");
-      const history = [...messages, { role: "user" as const, content: currentQuestion }].slice(-12);
+      const history = [...messages, { role: "user" as const, content: userContent }].slice(-12);
       setMessages((current) => [...current, { role: "assistant", content: "" }]);
       const response = await functionRequest("ai-chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model, documentContext: documentText.slice(0, 100000), messages: history, requestId: crypto.randomUUID() }) });
       await consumeAiStream(response, delta => setMessages(current => current.map((message, index) => index === current.length - 1 ? { ...message, content: message.content + delta } : message)));
@@ -2597,6 +2694,7 @@ function App() {
     onImportUrl={async value => { setLibraryOpen(false); await loadPdfUrl(value, true); }}
     extractText={extractLibraryPaperText}
     onOpenAccount={() => { setLibraryOpen(false); setAuthOpen(true); }}
+    userId={session.user.id}
   />;
 
   if (!pdf) {
@@ -2818,7 +2916,8 @@ function App() {
                   onVisualSelect={addVisualSelection}
                   onVisualClose={(id) => setVisualSelections(items => items.filter(item => item.id !== id))}
                   onVisualTask={runVisualTask}
-                  onVisualFollowup={followupVisualExplanation}
+              onVisualFollowup={followupVisualExplanation}
+                  onPalette={selectPaletteSource}
                   onNavigate={goToOutline}
                   onVisible={(page) => { setCurrentPage(page); setPageInput(String(page)); }}
                 />
@@ -2846,12 +2945,13 @@ function App() {
               <button className={sidePanelTab === "ai" ? "active" : ""} role="tab" aria-selected={sidePanelTab === "ai"} onClick={() => setSidePanelTab("ai")}><Sparkles size={15} /> AI 助手</button>
               <button className={sidePanelTab === "notes" ? "active" : ""} role="tab" aria-selected={sidePanelTab === "notes"} onClick={() => setSidePanelTab("notes")}><StickyNote size={15} /> 笔记 <span className="note-count">{selections.filter(item => item.note?.trim()).length}</span></button>
               <button className={sidePanelTab === "brainstorm" ? "active" : ""} role="tab" aria-selected={sidePanelTab === "brainstorm"} onClick={() => setSidePanelTab("brainstorm")}><Brain size={15} /> Brainstorm</button>
+              <button className={sidePanelTab === "tools" ? "active" : ""} role="tab" aria-selected={sidePanelTab === "tools"} onClick={() => setSidePanelTab("tools")}><Wrench size={15} /> 科研工具箱</button>
             </div>
             <IconButton label="收起面板" onClick={() => setPanelOpen(false)}>
               <ChevronRight size={17} />
             </IconButton>
           </div>
-          {sidePanelTab === "brainstorm" ? <BrainstormPanel session={session} model={model} documentTitle={documentTitle || fileName.replace(/\.pdf$/i, "")} documentText={documentText} currentPaperId={currentPaperId} onOpenLibrary={() => setLibraryOpen(true)} onUsage={creditsRemaining => setUsage(current => current ? { ...current, creditsRemaining } : current)} /> : sidePanelTab === "ai" ? <><div className="panel-content ai-reading-panel">
+          {sidePanelTab === "brainstorm" ? <BrainstormPanel session={session} model={model} documentTitle={documentTitle || fileName.replace(/\.pdf$/i, "")} documentText={documentText} currentPaperId={currentPaperId} onOpenLibrary={() => setLibraryOpen(true)} onUsage={creditsRemaining => setUsage(current => current ? { ...current, creditsRemaining } : current)} /> : sidePanelTab === "tools" ? <div className="panel-content research-tools-panel"><section className="research-tools-intro"><span><Wrench size={15}/> RESEARCH TOOLBOX</span><h2>科研工具箱</h2><p>把论文中的图像转成可复用的研究素材。</p></section><section className="research-tool-card"><div className="research-tool-card-heading"><div><Palette size={18}/><strong>提取科研配色</strong></div><span>本地分析</span></div><p>框选论文中的图表或图片，提取其中最常见的 RGB 颜色。</p><button className="research-tool-start" onClick={() => { setVisualMode(true); setSelections([]); }} disabled={!pdf}>{visualMode ? "请在论文中框选图像" : "框选论文图像"}<Crop size={16}/></button>{paletteSource && <div className="palette-result"><img src={paletteSource.imageDataUrl} alt="已选图像"/><div className="palette-result-heading"><strong>提取结果</strong><button onClick={() => void navigator.clipboard.writeText(paletteColors.map(color => `RGB(${color.r}, ${color.g}, ${color.b})`).join("\n"))} disabled={!paletteColors.length}><Copy size={14}/>复制 RGB</button></div>{paletteLoading ? <p>正在分析图像颜色…</p> : paletteColors.length ? <div className="palette-swatches">{paletteColors.map(color => <div className="palette-swatch" key={`${color.r}-${color.g}-${color.b}`}><span style={{ background: `rgb(${color.r}, ${color.g}, ${color.b})` }}/><div><b>RGB({color.r}, {color.g}, {color.b})</b><small>{Math.round(color.share * 100)}% · {color.count} 像素</small></div></div>)}</div> : <p>没有提取到有效颜色。</p>}</div>}</section></div> : sidePanelTab === "ai" ? <><div className="panel-content ai-reading-panel">
             {(
               [
                 ["short", "三行摘要", summary.short],
@@ -2925,7 +3025,7 @@ function App() {
             <section className="chat-thread">
               <div className="chat-messages">
                 {messages.map((message, index) => (
-                  <div key={index} className={`chat-message ${message.role}`}>
+                  <div key={index} className={`chat-message ${message.role}`} onMouseUp={event => captureChatQuote(event, message)} title={message.role === "assistant" ? "选中文字后可引用追问" : undefined}>
                     {message.content ? <ReactMarkdown>{message.content}</ReactMarkdown> : "正在思考…"}
                   </div>
                 ))}
@@ -2933,6 +3033,7 @@ function App() {
             </section>
           </div>
           <div className="chat-composer">
+            {chatQuote && <div className="chat-quote"><div><Quote size={14}/><strong>引用 AI 回答</strong></div><button aria-label="清除引用" title="清除引用" onClick={() => setChatQuote("")}><X size={14}/></button><p>{chatQuote}</p></div>}
             <textarea
               aria-label="文档提问"
               placeholder={model ? "针对文档提问…" : "请先配置模型"}

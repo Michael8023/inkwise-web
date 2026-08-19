@@ -1,7 +1,9 @@
-import { body, env, json, user } from "../_shared/core.ts";
+import { admin, body, env, json, user } from "../_shared/core.ts";
 import { corsHeaders, preflight } from "../_shared/cors.ts";
 
 const baseUrl = "https://mineru.net/api/v4";
+const freeUploadLimit = 15 * 1024 * 1024;
+const proUploadLimit = 50 * 1024 * 1024;
 
 function headers() {
   return {
@@ -18,13 +20,20 @@ function upstreamError(payload: any, fallback: string) {
 Deno.serve(async req => {
   const cors = preflight(req); if (cors) return cors;
   try {
-    await user(req);
+    const currentUser = await user(req);
     if (req.method !== "POST") return json({ error: "METHOD_NOT_ALLOWED" }, 405);
     const input = await body(req);
     const action = String(input.action || "");
     if (action === "prepare") {
       const name = String(input.name || "document.pdf").replace(/[^\w.\-() ]/g, "_").slice(0, 120);
+      const fileSize = Number(input.fileSize || 0);
       if (!name.toLowerCase().endsWith(".pdf")) throw new Error("PDF_REQUIRED");
+      if (!Number.isSafeInteger(fileSize) || fileSize < 1) throw new Error("PDF_SIZE_INVALID");
+      const { data: entitlement, error: entitlementError } = await admin().from("user_entitlements")
+        .select("period_end,status,plans(name)").eq("user_id", currentUser.id).maybeSingle();
+      if (entitlementError) throw entitlementError;
+      const isPro = (entitlement as any)?.plans?.name === "pro" && (entitlement as any)?.status === "active" && new Date((entitlement as any)?.period_end || 0) > new Date();
+      if (fileSize > (isPro ? proUploadLimit : freeUploadLimit)) throw new Error(isPro ? "MINERU_PRO_FILE_TOO_LARGE" : "MINERU_PRO_REQUIRED_FOR_LARGE_FILE");
       const response = await fetch(`${baseUrl}/file-urls/batch`, {
         method: "POST", headers: headers(),
         body: JSON.stringify({ files: [{ name, data_id: crypto.randomUUID() }], model_version: "vlm" }),
@@ -33,6 +42,7 @@ Deno.serve(async req => {
       if (!response.ok || payload?.code !== 0 || !payload?.data?.file_urls?.[0]) throw new Error(upstreamError(payload, "MINERU_PREPARE_FAILED"));
       return json({
         batchId: payload.data.batch_id,
+        maxUploadBytes: isPro ? proUploadLimit : freeUploadLimit,
         uploadUrl: payload.data.file_urls[0],
         // MinerU currently returns a presigned URL without extra headers. Keep
         // this explicit so the browser/Worker never guesses signed headers.

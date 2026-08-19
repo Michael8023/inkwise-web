@@ -1,9 +1,10 @@
-const maxUploadBytes = 15 * 1024 * 1024;
+const freeUploadBytes = 15 * 1024 * 1024;
+const proUploadBytes = 50 * 1024 * 1024;
 const mineruOssHost = "mineru.oss-cn-shanghai.aliyuncs.com";
 const uploadCorsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "PUT, OPTIONS",
-  "Access-Control-Allow-Headers": "content-type",
+  "Access-Control-Allow-Headers": "content-type, authorization",
 };
 
 function badRequest(message: string, status = 400) {
@@ -14,9 +15,23 @@ function badRequest(message: string, status = 400) {
 }
 
 type StaticAssets = { fetch(request: Request): Promise<Response> };
+type Env = { ASSETS: StaticAssets; SUPABASE_URL: string; SUPABASE_ANON_KEY: string };
+
+async function uploadLimit(request: Request, env: Env) {
+  const authorization = request.headers.get("authorization") || "";
+  if (!authorization.startsWith("Bearer ") || !env.SUPABASE_URL || !env.SUPABASE_ANON_KEY) return 0;
+  const response = await fetch(`${env.SUPABASE_URL}/rest/v1/user_entitlements?select=period_end,status,plans(name)`, {
+    headers: { apikey: env.SUPABASE_ANON_KEY, Authorization: authorization },
+  });
+  if (!response.ok) return 0;
+  const rows = await response.json() as Array<{ period_end?: string; status?: string; plans?: { name?: string } | Array<{ name?: string }> }>;
+  const entitlement = rows[0];
+  const plan = Array.isArray(entitlement?.plans) ? entitlement.plans[0]?.name : entitlement?.plans?.name;
+  return plan === "pro" && entitlement?.status === "active" && new Date(entitlement.period_end || 0) > new Date() ? proUploadBytes : freeUploadBytes;
+}
 
 export default {
-  async fetch(request: Request, env: { ASSETS: StaticAssets }) {
+  async fetch(request: Request, env: Env) {
     const requestUrl = new URL(request.url);
     if (requestUrl.pathname !== "/api/mineru-upload") return env.ASSETS.fetch(request);
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: uploadCorsHeaders });
@@ -29,8 +44,10 @@ export default {
     if (uploadUrl.protocol !== "https:" || uploadUrl.hostname !== mineruOssHost || !uploadUrl.pathname.startsWith("/api-upload/extract/")) {
       return badRequest("MINERU_UPLOAD_TARGET_REJECTED", 403);
     }
+    const limit = await uploadLimit(request, env);
+    if (!limit) return badRequest("AUTH_REQUIRED", 401);
     const length = Number(request.headers.get("content-length") || 0);
-    if (length > maxUploadBytes) return badRequest("MINERU_FILE_TOO_LARGE", 413);
+    if (!Number.isFinite(length) || length < 1 || length > limit) return badRequest("MINERU_FILE_TOO_LARGE", 413);
 
     const encodedHeaders = requestUrl.searchParams.get("headers") || "";
     let signedHeaders: Record<string, string> = {};
