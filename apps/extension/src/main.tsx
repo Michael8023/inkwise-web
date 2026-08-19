@@ -1203,7 +1203,9 @@ function PageView({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const layerRef = useRef<HTMLDivElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
-  const [size, setSize] = useState({ width: 0, height: 0 });
+  const estimatedSize = { width: Math.round(595 * scale), height: Math.round(842 * scale) };
+  const [size, setSize] = useState(estimatedSize);
+  const [shouldRender, setShouldRender] = useState(pageNumber === 1);
   const [loading, setLoading] = useState(true);
   const [pageText, setPageText] = useState("");
   const [activeHighlight, setActiveHighlight] = useState<{ id: string; area: { x: number; y: number; width: number; height: number } } | null>(null);
@@ -1228,6 +1230,17 @@ function PageView({
   }, [onVisible, pageNumber]);
 
   useEffect(() => {
+    const host = hostRef.current;
+    if (!host || shouldRender) return;
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting) setShouldRender(true);
+    }, { root: document.querySelector(".document-scroll"), rootMargin: "1400px 0px" });
+    observer.observe(host);
+    return () => observer.disconnect();
+  }, [shouldRender]);
+
+  useEffect(() => {
+    if (!shouldRender) return;
     let cancelled = false;
     async function render() {
       setLoading(true);
@@ -1334,7 +1347,7 @@ function PageView({
     return () => {
       cancelled = true;
     };
-  }, [pdf, pageNumber, scale]);
+  }, [pdf, pageNumber, scale, shouldRender]);
 
   function selectText() {
     if (visualMode) return;
@@ -1466,8 +1479,8 @@ function PageView({
           }, 500);
         }}
       >
-        <canvas ref={canvasRef} />
-        <div className="text-layer" ref={layerRef} />
+        {shouldRender && <><canvas ref={canvasRef} />
+        <div className="text-layer" ref={layerRef} /></>}
         {visualDraft && <div className="visual-selection-draft" style={{ left: `${visualDraft.x * 100}%`, top: `${visualDraft.y * 100}%`, width: `${visualDraft.width * 100}%`, height: `${visualDraft.height * 100}%` }} />}
         {mineruReady && <div className="pdf-link-regions" aria-label="PDF 链接">{pdfLinks.map(link => link.url ? <a key={link.id} href={link.url} target="_blank" rel="noopener noreferrer" className="pdf-link-region" style={{ left: `${link.area.x * 100}%`, top: `${link.area.y * 100}%`, width: `${link.area.width * 100}%`, height: `${link.area.height * 100}%` }} title={link.label} aria-label={link.label} onClick={event => event.stopPropagation()} /> : <button key={link.id} type="button" className="pdf-link-region" style={{ left: `${link.area.x * 100}%`, top: `${link.area.y * 100}%`, width: `${link.area.width * 100}%`, height: `${link.area.height * 100}%` }} title={link.label} aria-label={link.label} onClick={event => { event.stopPropagation(); onNavigate(link.destination); }} />)}</div>}
         <div className="auto-visual-regions" aria-label="自动识别的文档结构区域">{(mineruReady ? mineruRegions : visualRegions).map(region => {
@@ -1498,7 +1511,7 @@ function PageView({
           )}
           {activeHighlight && <button type="button" className="highlight-delete" aria-label="删除高亮" title="删除高亮" style={{ left: `${Math.min(97, (activeHighlight.area.x + activeHighlight.area.width) * 100)}%`, top: `${Math.max(0, (activeHighlight.area.y + activeHighlight.area.height / 2) * 100)}%` }} onMouseEnter={() => { if (highlightHideTimer.current !== null) window.clearTimeout(highlightHideTimer.current); highlightHideTimer.current = null; setActiveHighlight(activeHighlight); }} onMouseLeave={() => { highlightHideTimer.current = window.setTimeout(() => setActiveHighlight(null), 500); }} onClick={(event) => { event.stopPropagation(); onDeleteHighlight(activeHighlight.id); setActiveHighlight(null); }}><Trash2 size={13} /></button>}
         </div>
-        {loading && <div className="page-loading" />}
+        {shouldRender && loading && <div className="page-loading" />}
         {selections.filter(selection => !selection.popoverClosed).map((selection) => (
           <SelectionPopover
             key={selection.id}
@@ -1558,9 +1571,11 @@ function App() {
   const autoLayoutDocument = useRef("");
   const autoSummaryDocument = useRef("");
   const summaryRequests = useRef(new Set<"short" | "full">());
+  const pdfOpenVersion = useRef(0);
   const fileInput = useRef<HTMLInputElement>(null);
   const [documentId, setDocumentId] = useState("");
   const [documentText, setDocumentText] = useState("");
+  const [documentTextReady, setDocumentTextReady] = useState(false);
   const [documentReady, setDocumentReady] = useState(false);
   const [pdfOpening, setPdfOpening] = useState(false);
   const [models, setModels] = useState<Array<{ id: string; name: string; available?: boolean; tier?: "free" | "pro" }>>([]);
@@ -1765,7 +1780,7 @@ function App() {
     void archiveCurrentDocument();
   }, [session, pdf, documentReady, documentId, currentPaperId]);
   useEffect(() => {
-    if (!session || usage?.plan !== "pro" || !paperStateLoaded || !documentReady || !documentId || !model || !documentText) return;
+    if (!session || usage?.plan !== "pro" || !paperStateLoaded || !documentReady || !documentTextReady || !documentId || !model || !documentText) return;
     const missingShort = !summary.short;
     const missingFull = !summary.full;
     const summaryKey = `${documentId}:pro`;
@@ -1776,7 +1791,7 @@ function App() {
     autoSummaryDocument.current = summaryKey;
     if (missingShort) void requestSummary("short");
     if (missingFull) void requestSummary("full");
-  }, [session, usage?.plan, paperStateLoaded, documentReady, documentId, model, documentText, summary.short, summary.full]);
+  }, [session, usage?.plan, paperStateLoaded, documentReady, documentTextReady, documentId, model, documentText, summary.short, summary.full]);
   useEffect(() => {
     if (!session || !currentPaperId || !documentReady || !paperStateLoaded || libraryHydrating.current) return;
     const timer = window.setTimeout(() => void persistLibraryState(), 900);
@@ -1791,7 +1806,9 @@ function App() {
   useEffect(() => {
     if (nativePdfView || !session || !usage || !documentReady || !documentId || !paperStateLoaded || mineruReady || autoLayoutDocument.current === documentId) return;
     autoLayoutDocument.current = documentId;
-    void runMineruLayout();
+    // Keep network and CPU available for the initial reading interaction.
+    const timer = window.setTimeout(() => void runMineruLayout(), 3500);
+    return () => window.clearTimeout(timer);
   }, [nativePdfView, session, usage, documentReady, documentId, paperStateLoaded, mineruReady]);
   useEffect(() => {
     if (!pdf) return;
@@ -2115,6 +2132,7 @@ function App() {
   }, []);
 
   function beginPdfOpen(name: string, options: { paperId?: string; sourceUrl?: string | null } = {}) {
+    const openVersion = ++pdfOpenVersion.current;
     setPdfOpening(true);
     if (session) window.sessionStorage.removeItem(`shidea-active-paper:${session.user.id}`);
     libraryHydrating.current = false;
@@ -2122,56 +2140,73 @@ function App() {
     setCurrentPaperId(options.paperId || "");
     setPaperStateLoaded(!options.paperId);
     importSourceUrl.current = options.sourceUrl || null;
+    pdfBytes.current = null;
     setSelections([]); setHighlights([]); setVisualSelections([]); setPaletteSource(null); setPaletteColors([]); setVisualMode(false); setMineruRegions([]); setMineruReady(false); detectedDocumentTitle.current = ""; setDocumentTitle(""); setLayoutState({ state: "idle" }); autoLayoutDocument.current = "";
-    setDocumentReady(false); setDocumentText(""); setPdf(null); setOutline([]);
+    setDocumentReady(false); setDocumentText(""); setDocumentTextReady(false); setPdf(null); setOutline([]);
     setFileName(name);
     setSummary({}); setSummaryOpen({ short: false, full: false });
     setMessages([]); setQuestion(""); setPageInput("1"); setCurrentPage(1);
+    return openVersion;
   }
-  async function finishPdfOpen(document: any) {
+  async function finishPdfOpen(document: any, openVersion: number) {
+    if (openVersion !== pdfOpenVersion.current) return;
     setPdf(document);
     setDocumentId(crypto.randomUUID());
     setUrlLoading(false);
-    setOutline(((await document.getOutline().catch(() => [])) ?? []) as OutlineItem[]);
+    const nextOutline = ((await document.getOutline().catch(() => [])) ?? []) as OutlineItem[];
+    if (openVersion !== pdfOpenVersion.current) return;
+    setOutline(nextOutline);
     const metadata = await document.getMetadata().catch(() => null);
+    if (openVersion !== pdfOpenVersion.current) return;
     setDetectedDocumentTitle(metadata?.info?.Title, false);
-    if (!detectedDocumentTitle.current) setDetectedDocumentTitle(await inferFirstPageTitle(document), false);
+    if (!detectedDocumentTitle.current) {
+      const inferredTitle = await inferFirstPageTitle(document);
+      if (openVersion !== pdfOpenVersion.current) return;
+      setDetectedDocumentTitle(inferredTitle, false);
+    }
     // PDF.js takes ownership of the TypedArray passed to getDocument(), so
     // retain analysis bytes from its own cached document instead of reusing
     // the caller's now-detached ArrayBuffer.
     try {
       const downloaded = await document.getData();
+      if (openVersion !== pdfOpenVersion.current) return;
       if (downloaded.byteLength > MAX_PDF_IMPORT_BYTES) throw new Error("PDF_IMPORT_TOO_LARGE");
       pdfBytes.current = downloaded.buffer.slice(downloaded.byteOffset, downloaded.byteOffset + downloaded.byteLength) as ArrayBuffer;
     } catch {
       // Analysis enhancements are optional; a readable PDF must remain open
       // even when cached bytes are unavailable or exceed their safe limit.
-      pdfBytes.current = null;
+      if (openVersion === pdfOpenVersion.current) pdfBytes.current = null;
     }
-    try {
-      const pages: string[] = [];
-      for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber++) {
-        const page = await document.getPage(pageNumber);
-        const content = await page.getTextContent();
-        pages.push(content.items.map((item: any) => item.str).join(" "));
+    if (openVersion !== pdfOpenVersion.current) return;
+    // The reader can render its first page without waiting for every page's
+    // text layer. Extract the full text incrementally in the background.
+    setDocumentReady(true);
+    void (async () => {
+      try {
+        const pages: string[] = [];
+        for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber++) {
+          const page = await document.getPage(pageNumber);
+          const content = await page.getTextContent();
+          pages.push(content.items.map((item: any) => item.str).join(" "));
+          if (pageNumber % 4 === 0) await new Promise<void>(resolve => window.setTimeout(resolve, 0));
+        }
+        if (openVersion === pdfOpenVersion.current) {
+          setDocumentText(pages.map((text, index) => `\n[第 ${index + 1} 页]\n${text}`).join("\n"));
+        }
+      } catch {
+        if (openVersion === pdfOpenVersion.current) setDocumentText("");
+      } finally {
+        if (openVersion === pdfOpenVersion.current) setDocumentTextReady(true);
       }
-      const nextDocumentText = pages
-        .map((text, index) => `\n[第 ${index + 1} 页]\n${text}`)
-        .join("\n");
-      setDocumentText(nextDocumentText);
-      setDocumentReady(true);
-    } catch {
-      // A damaged text layer should not prevent ordinary PDF reading.
-      setDocumentText("");
-      setDocumentReady(true);
-    }
+    })();
   }
   async function openPdfData(data: ArrayBuffer, name: string, options: { paperId?: string; sourceUrl?: string | null } = {}) {
+    const openVersion = beginPdfOpen(name, options);
     try {
-      beginPdfOpen(name, options);
       const document = await pdfjsLib.getDocument({ data: new Uint8Array(data) }).promise;
-      await finishPdfOpen(document);
+      await finishPdfOpen(document, openVersion);
     } catch {
+      if (openVersion !== pdfOpenVersion.current) return;
       setUrlLoading(false);
       setPdfOpening(false);
       setPdf(null);
@@ -2181,11 +2216,12 @@ function App() {
     }
   }
   async function openPdfRemote(url: URL, name: string, options: { paperId?: string } = {}) {
+    const openVersion = beginPdfOpen(name, { ...options, sourceUrl: url.toString() });
     try {
-      beginPdfOpen(name, { ...options, sourceUrl: url.toString() });
       const document = await pdfjsLib.getDocument({ url: url.toString(), withCredentials: false }).promise;
-      await finishPdfOpen(document);
+      await finishPdfOpen(document, openVersion);
     } catch {
+      if (openVersion !== pdfOpenVersion.current) return;
       setUrlLoading(false);
       setPdfOpening(false);
       setPdf(null);
@@ -2420,7 +2456,7 @@ function App() {
     await loadPdfUrl(paperUrl, true);
   }
   async function requestSummary(kind: "short" | "full") {
-    if (!documentReady || !model || !documentId || summaryRequests.current.has(kind)) return;
+    if (!documentReady || !documentTextReady || !model || !documentId || summaryRequests.current.has(kind)) return;
     summaryRequests.current.add(kind);
     setSummary((current) => ({ ...current, loading: kind }));
     try {
@@ -2522,7 +2558,7 @@ function App() {
   }
   async function askQuestion() {
     const currentQuestion = question.trim();
-    if (!currentQuestion || !documentReady || !model || chatLoading) return;
+    if (!currentQuestion || !documentReady || !documentTextReady || !model || chatLoading) return;
     const referenced = chatQuote.trim();
     setQuestion("");
     setChatQuote("");
@@ -2656,6 +2692,7 @@ function App() {
   function searchDocument() {
     const query = searchQuery.trim();
     if (!query) { setSearchNotice(""); return; }
+    if (!documentTextReady) { setSearchNotice("正在建立全文索引…"); return; }
     const source = documentText.toLocaleLowerCase();
     const needle = query.toLocaleLowerCase();
     const index = source.indexOf(needle);
@@ -3014,7 +3051,7 @@ function App() {
                     className="generate-summary"
                     onClick={() => requestSummary(kind)}
                     disabled={
-                      !model || !documentReady || summary.loading === kind
+                      !model || !documentReady || !documentTextReady || summary.loading === kind
                     }
                   >
                     {summary.loading === kind ? "生成中…" : `生成${title}`}
@@ -3036,7 +3073,7 @@ function App() {
             {chatQuote && <div className="chat-quote"><div><Quote size={14}/><strong>引用 AI 回答</strong></div><button aria-label="清除引用" title="清除引用" onClick={() => setChatQuote("")}><X size={14}/></button><p>{chatQuote}</p></div>}
             <textarea
               aria-label="文档提问"
-              placeholder={model ? "针对文档提问…" : "请先配置模型"}
+              placeholder={model ? (documentTextReady ? "针对文档提问…" : "正在建立全文索引…") : "请先配置模型"}
               value={question}
               onChange={(event) => setQuestion(event.target.value)}
               onKeyDown={(event) => {
@@ -3045,14 +3082,14 @@ function App() {
                   askQuestion();
                 }
               }}
-              disabled={!model || !documentReady}
+              disabled={!model || !documentReady || !documentTextReady}
             />
             <button
               className="send-button"
               aria-label="发送问题"
               onClick={askQuestion}
               disabled={
-                !model || !documentReady || !question.trim() || chatLoading
+                !model || !documentReady || !documentTextReady || !question.trim() || chatLoading
               }
             >
               <Send size={17} />
