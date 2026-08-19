@@ -1458,6 +1458,10 @@ body.is-resizing-panel * {
 .chat-message p:empty,
 .summary-result p:has(> br:only-child),
 .chat-message p:has(> br:only-child) { display: none; }
+.popover-result .katex-display,
+.summary-result .katex-display,
+.chat-message .katex-display,
+.brainstorm-result .katex-display { max-width: 100%; overflow-x: auto; overflow-y: hidden; padding: 4px 0; }
 .panel-empty {
   min-height: 220px;
   display: flex;

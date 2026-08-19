@@ -1,6 +1,9 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import ReactMarkdown from "react-markdown";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import "katex/dist/katex.min.css";
 import * as pdfjsLib from "pdfjs-dist";
 import JSZip from "jszip";
 import { functionRequest, supabase, supabaseConfigured } from "./api";
@@ -56,6 +59,10 @@ import { mountAdmin } from "./admin";
 import { AboutPage } from "./about";
 import { RedeemPage } from "./redeem";
 import { mountRedemptionAdmin } from "./redemption-admin";
+
+function AiMarkdown({ children }: { children: string }) {
+  return <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{children}</ReactMarkdown>;
+}
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   "pdfjs-dist/build/pdf.worker.mjs",
@@ -601,7 +608,7 @@ function BrainstormPanel({ session, model, documentTitle, documentText, currentP
     finally { setRunning(false); }
   }
   if (!session) return <div className="brainstorm-empty"><Brain size={28}/><strong>登录后开启 Brainstorm</strong><p>将你的研究主线与私有文献库连接起来，获得有依据的研究启发。</p></div>;
-  return <div className="panel-content brainstorm-panel"><section className="brainstorm-intro"><span><Brain size={16}/> RESEARCH BRAINSTORM</span><h2>从文献到你的下一步</h2><p>AI 会围绕你的研究主线，区分论文证据与可验证的推断。</p></section><section className="brainstorm-profile"><div><strong>当前研究主线</strong><button type="button" onClick={onOpenLibrary}>在工作台编辑</button></div>{loading ? <p>正在读取研究画像…</p> : overview ? <p>{overview}</p> : <div className="brainstorm-profile-empty"><p>尚未填写个人工作概述。先在文献工作台定义研究目标与约束，Brainstorm 才能给出贴合的建议。</p><button type="button" onClick={onOpenLibrary}>建立研究主线</button></div>}</section><section className="brainstorm-sources"><div className="brainstorm-section-heading"><strong>本次参考文献</strong><small>最多再选 5 篇</small></div><label className="brainstorm-current"><input type="checkbox" checked readOnly/><span><b>当前</b>{documentTitle || "当前阅读文献"}</span></label>{loading ? null : availablePapers.length ? <div className="brainstorm-library-list">{availablePapers.map(paper => <label key={paper.id}><input type="checkbox" checked={selected.includes(paper.id)} disabled={!selected.includes(paper.id) && selected.length >= 5} onChange={() => togglePaper(paper.id)}/><span>{paper.title}<small>{paper.page_count || "—"} 页 · 文献库{paper.document_text ? "" : " · 首次分析时读取"}</small></span></label>)}</div> : <p className="brainstorm-muted">文献库中还没有其他文献。</p>}</section><button className="brainstorm-run" onClick={() => void brainstorm()} disabled={running || !model || !overview.trim() || !documentText.trim()}>{running ? <><RefreshCw className="auth-spinner" size={16}/>正在连接研究线索…</> : <><Brain size={17}/>生成研究启发{selected.length ? ` · 另含 ${selected.length} 篇` : ""}</>}</button>{!model && <p className="brainstorm-muted">请先在 AI 助手中选择模型。</p>}{result && <section className="brainstorm-result"><div><strong>本次启发</strong><button type="button" onClick={() => navigator.clipboard.writeText(result)} title="复制结果"><Copy size={15}/></button></div><ReactMarkdown>{result}</ReactMarkdown></section>}</div>;
+  return <div className="panel-content brainstorm-panel"><section className="brainstorm-intro"><span><Brain size={16}/> RESEARCH BRAINSTORM</span><h2>从文献到你的下一步</h2><p>AI 会围绕你的研究主线，区分论文证据与可验证的推断。</p></section><section className="brainstorm-profile"><div><strong>当前研究主线</strong><button type="button" onClick={onOpenLibrary}>在工作台编辑</button></div>{loading ? <p>正在读取研究画像…</p> : overview ? <p>{overview}</p> : <div className="brainstorm-profile-empty"><p>尚未填写个人工作概述。先在文献工作台定义研究目标与约束，Brainstorm 才能给出贴合的建议。</p><button type="button" onClick={onOpenLibrary}>建立研究主线</button></div>}</section><section className="brainstorm-sources"><div className="brainstorm-section-heading"><strong>本次参考文献</strong><small>最多再选 5 篇</small></div><label className="brainstorm-current"><input type="checkbox" checked readOnly/><span><b>当前</b>{documentTitle || "当前阅读文献"}</span></label>{loading ? null : availablePapers.length ? <div className="brainstorm-library-list">{availablePapers.map(paper => <label key={paper.id}><input type="checkbox" checked={selected.includes(paper.id)} disabled={!selected.includes(paper.id) && selected.length >= 5} onChange={() => togglePaper(paper.id)}/><span>{paper.title}<small>{paper.page_count || "—"} 页 · 文献库{paper.document_text ? "" : " · 首次分析时读取"}</small></span></label>)}</div> : <p className="brainstorm-muted">文献库中还没有其他文献。</p>}</section><button className="brainstorm-run" onClick={() => void brainstorm()} disabled={running || !model || !overview.trim() || !documentText.trim()}>{running ? <><RefreshCw className="auth-spinner" size={16}/>正在连接研究线索…</> : <><Brain size={17}/>生成研究启发{selected.length ? ` · 另含 ${selected.length} 篇` : ""}</>}</button>{!model && <p className="brainstorm-muted">请先在 AI 助手中选择模型。</p>}{result && <section className="brainstorm-result"><div><strong>本次启发</strong><button type="button" onClick={() => navigator.clipboard.writeText(result)} title="复制结果"><Copy size={15}/></button></div><AiMarkdown>{result}</AiMarkdown></section>}</div>;
 }
 
 function PaymentResultScreen() {
@@ -1089,7 +1096,7 @@ function SelectionPopover({
       </div>
       {selection.task && (
         <div className={`popover-result ${selection.task.state}`} aria-live="polite">
-          {selection.task.state === "loading" ? "正在处理..." : <ReactMarkdown>{selection.task.result || ""}</ReactMarkdown>}
+          {selection.task.state === "loading" ? "正在处理..." : <AiMarkdown>{selection.task.result || ""}</AiMarkdown>}
         </div>
       )}
       {selection.task?.kind === "explain" && selection.task.state === "done" && (
@@ -1139,7 +1146,7 @@ function VisualPopover({ selection, pageRef, onClose, onTask, onFollowup, onPale
     {!collapsed && <div className="visual-popover-scroll">
       <img src={selection.imageDataUrl} alt="框选的 PDF 区域"/>
       <div className="popover-actions visual-actions"><button onClick={() => onTask(selection, "explain")} disabled={selection.task?.state === "loading"}><ImageIcon size={14}/>AI 解读</button><button onClick={() => onTask(selection, "table")} disabled={selection.task?.state === "loading"}><Table2 size={14}/>提取表格</button>{onPalette && <button onClick={() => onPalette(selection)}><Palette size={14}/>提取配色</button>}<button title="复制图片" onClick={() => copyImage().catch(() => undefined)}><Copy size={14}/></button><a title="下载图片" href={selection.imageDataUrl} download={`shidea-page-${selection.pageNumber}.jpg`}><Download size={14}/></a></div>
-      {selection.task && <div className={`popover-result ${selection.task.state}`}>{selection.task.state === "loading" ? "正在理解图表…" : <><ReactMarkdown>{selection.task.result || ""}</ReactMarkdown>{selection.task.state === "done" && <button className="visual-copy-result" onClick={() => navigator.clipboard.writeText(selection.task?.result || "")}><Copy size={13}/>复制结果</button>}</>}</div>}
+      {selection.task && <div className={`popover-result ${selection.task.state}`}>{selection.task.state === "loading" ? "正在理解图表…" : <><AiMarkdown>{selection.task.result || ""}</AiMarkdown>{selection.task.state === "done" && <button className="visual-copy-result" onClick={() => navigator.clipboard.writeText(selection.task?.result || "")}><Copy size={13}/>复制结果</button>}</>}</div>}
       {selection.task?.kind === "explain" && selection.task.state === "done" && <form className="explain-followup" onSubmit={event => { event.preventDefault(); const value=followup.trim(); if (!value || !onFollowup) return; onFollowup(selection,value); setFollowup(""); }}><input value={followup} onChange={event => setFollowup(event.target.value)} placeholder="继续追问这张图…"/><button disabled={!followup.trim()}><Send size={14}/></button></form>}
     </div>}
   </div>;
@@ -3016,7 +3023,7 @@ function App() {
                     <div
                       className={`summary-result reference-style${summaryOpen[kind] ? " open" : ""}`}
                     >
-                      {value ? <ReactMarkdown>{value}</ReactMarkdown> : <span className="summary-streaming">正在生成摘要…</span>}
+                      {value ? <AiMarkdown>{value}</AiMarkdown> : <span className="summary-streaming">正在生成摘要…</span>}
                     </div>
                     <div className="summary-tools">
                       <IconButton
@@ -3063,7 +3070,7 @@ function App() {
               <div className="chat-messages">
                 {messages.map((message, index) => (
                   <div key={index} className={`chat-message ${message.role}`} onMouseUp={event => captureChatQuote(event, message)} title={message.role === "assistant" ? "选中文字后可引用追问" : undefined}>
-                    {message.content ? <ReactMarkdown>{message.content}</ReactMarkdown> : "正在思考…"}
+                    {message.content ? <AiMarkdown>{message.content}</AiMarkdown> : "正在思考…"}
                   </div>
                 ))}
               </div>
