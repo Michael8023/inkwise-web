@@ -1558,6 +1558,7 @@ function App() {
   const [tab, setTab] = useState<Tab>("summary");
   const [selections, setSelections] = useState<Selection[]>([]);
   const [sidePanelTab, setSidePanelTab] = useState<"ai" | "notes" | "brainstorm" | "tools">("ai");
+  const [activeResearchTool, setActiveResearchTool] = useState<"palette" | null>(null);
   const [activeNoteId, setActiveNoteId] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState("");
   const [highlights, setHighlights] = useState<SavedHighlight[]>([]);
@@ -2500,7 +2501,7 @@ function App() {
   function addVisualSelection(selection: Omit<VisualSelection, "id">) {
     const next = { ...selection, id: crypto.randomUUID() };
     setVisualSelections(items => [...items, next]);
-    if (sidePanelTab === "tools") void selectPaletteSource(next);
+    if (sidePanelTab === "tools" && activeResearchTool === "palette") void selectPaletteSource(next);
     setVisualMode(false);
     return next;
   }
@@ -2726,6 +2727,10 @@ function App() {
     if (!Array.isArray(resolved) || !resolved[0]) return;
     const pageIndex = await pdf.getPageIndex(resolved[0]);
     goToPage(pageIndex + 1);
+  }
+  function renderResearchTools() {
+    if (activeResearchTool === "palette") return <div className="panel-content research-tools-panel"><header className="research-tool-page-header"><IconButton label="返回工具箱" onClick={() => { setVisualMode(false); setActiveResearchTool(null); }}><ChevronLeft size={17}/></IconButton><div><span>RESEARCH TOOL</span><h2>提取科研配色</h2></div></header><section className="research-tool-workspace"><div className="research-tool-workspace-heading"><div className="research-tool-icon"><Palette size={18}/></div><div><strong>提取科研配色</strong><p>框选论文中的图表或图片，提取其中最常见的 RGB 颜色。</p></div></div><button className="research-tool-start" onClick={() => { setVisualMode(true); setSelections([]); }} disabled={!pdf}>{visualMode ? "请在论文中框选图像" : "框选论文图像"}<Crop size={16}/></button>{paletteSource && <div className="palette-result"><img src={paletteSource.imageDataUrl} alt="已选图像"/><div className="palette-result-heading"><strong>提取结果</strong><button onClick={() => void navigator.clipboard.writeText(paletteColors.map(color => `RGB(${color.r}, ${color.g}, ${color.b})`).join("\n"))} disabled={!paletteColors.length}><Copy size={14}/>复制 RGB</button></div>{paletteLoading ? <p>正在分析图像颜色…</p> : paletteColors.length ? <div className="palette-swatches">{paletteColors.map(color => <div className="palette-swatch" key={`${color.r}-${color.g}-${color.b}`}><span style={{ background: `rgb(${color.r}, ${color.g}, ${color.b})` }}/><div><b>RGB({color.r}, {color.g}, {color.b})</b><small>{Math.round(color.share * 100)}% · {color.count} 像素</small></div></div>)}</div> : <p>没有提取到有效颜色。</p>}</div>}</section></div>;
+    return <div className="panel-content research-tools-panel"><section className="research-tools-intro"><span><Wrench size={15}/> RESEARCH TOOLBOX</span><h2>科研工具箱</h2><p>将阅读中的图像、数据与想法转为可复用的研究素材。</p></section><section className="research-tool-list" aria-label="科研工具"><button type="button" className="research-tool-entry" onClick={() => setActiveResearchTool("palette")}><div className="research-tool-icon"><Palette size={18}/></div><div className="research-tool-body"><div className="research-tool-entry-heading"><strong>提取科研配色</strong><span>本地分析</span></div><p>从论文图表中提取常用 RGB 颜色。</p></div><ChevronRight className="research-tool-entry-arrow" size={17}/></button></section></div>;
   }
 
   if (feedbackOpen && session) return <FeedbackScreen session={session} onBack={() => setFeedbackOpen(false)} />;
@@ -2989,13 +2994,13 @@ function App() {
               <button className={sidePanelTab === "ai" ? "active" : ""} role="tab" aria-label="AI 助手" title="AI 助手" aria-selected={sidePanelTab === "ai"} onClick={() => setSidePanelTab("ai")}><Sparkles size={15} /><span className="side-panel-tab-label">AI 助手</span></button>
               <button className={sidePanelTab === "notes" ? "active" : ""} role="tab" aria-label="笔记" title="笔记" aria-selected={sidePanelTab === "notes"} onClick={() => setSidePanelTab("notes")}><StickyNote size={15} /><span className="side-panel-tab-label">笔记 <span className="note-count">{selections.filter(item => item.note?.trim()).length}</span></span></button>
               <button className={sidePanelTab === "brainstorm" ? "active" : ""} role="tab" aria-label="Brainstorm" title="Brainstorm" aria-selected={sidePanelTab === "brainstorm"} onClick={() => setSidePanelTab("brainstorm")}><Brain size={15} /><span className="side-panel-tab-label">Brainstorm</span></button>
-              <button className={sidePanelTab === "tools" ? "active" : ""} role="tab" aria-label="科研工具箱" title="科研工具箱" aria-selected={sidePanelTab === "tools"} onClick={() => setSidePanelTab("tools")}><Wrench size={15} /><span className="side-panel-tab-label">科研工具箱</span></button>
+              <button className={sidePanelTab === "tools" ? "active" : ""} role="tab" aria-label="科研工具箱" title="科研工具箱" aria-selected={sidePanelTab === "tools"} onClick={() => { setSidePanelTab("tools"); setVisualMode(false); setActiveResearchTool(null); }}><Wrench size={15} /><span className="side-panel-tab-label">科研工具箱</span></button>
             </div>
             <IconButton label="收起面板" onClick={() => setPanelOpen(false)}>
               <ChevronRight size={17} />
             </IconButton>
           </div>
-          {sidePanelTab === "brainstorm" ? <BrainstormPanel session={session} model={model} documentTitle={documentTitle || fileName.replace(/\.pdf$/i, "")} documentText={documentText} currentPaperId={currentPaperId} onOpenLibrary={() => setLibraryOpen(true)} onUsage={creditsRemaining => setUsage(current => current ? { ...current, creditsRemaining } : current)} /> : sidePanelTab === "tools" ? <div className="panel-content research-tools-panel"><section className="research-tools-intro"><span><Wrench size={15}/> RESEARCH TOOLBOX</span><h2>科研工具箱</h2><p>把论文中的图像转成可复用的研究素材。</p></section><section className="research-tool-list" aria-label="科研工具"><article className="research-tool-entry"><div className="research-tool-icon"><Palette size={18}/></div><div className="research-tool-body"><div className="research-tool-entry-heading"><strong>提取科研配色</strong><span>本地分析</span></div><p>框选论文中的图表或图片，提取其中最常见的 RGB 颜色。</p><button className="research-tool-start" onClick={() => { setVisualMode(true); setSelections([]); }} disabled={!pdf}>{visualMode ? "请在论文中框选图像" : "框选论文图像"}<Crop size={16}/></button>{paletteSource && <div className="palette-result"><img src={paletteSource.imageDataUrl} alt="已选图像"/><div className="palette-result-heading"><strong>提取结果</strong><button onClick={() => void navigator.clipboard.writeText(paletteColors.map(color => `RGB(${color.r}, ${color.g}, ${color.b})`).join("\n"))} disabled={!paletteColors.length}><Copy size={14}/>复制 RGB</button></div>{paletteLoading ? <p>正在分析图像颜色…</p> : paletteColors.length ? <div className="palette-swatches">{paletteColors.map(color => <div className="palette-swatch" key={`${color.r}-${color.g}-${color.b}`}><span style={{ background: `rgb(${color.r}, ${color.g}, ${color.b})` }}/><div><b>RGB({color.r}, {color.g}, {color.b})</b><small>{Math.round(color.share * 100)}% · {color.count} 像素</small></div></div>)}</div> : <p>没有提取到有效颜色。</p>}</div>}</div></article></section></div> : sidePanelTab === "ai" ? <><div className="panel-content ai-reading-panel">
+          {sidePanelTab === "brainstorm" ? <BrainstormPanel session={session} model={model} documentTitle={documentTitle || fileName.replace(/\.pdf$/i, "")} documentText={documentText} currentPaperId={currentPaperId} onOpenLibrary={() => setLibraryOpen(true)} onUsage={creditsRemaining => setUsage(current => current ? { ...current, creditsRemaining } : current)} /> : sidePanelTab === "tools" ? renderResearchTools() : sidePanelTab === "ai" ? <><div className="panel-content ai-reading-panel">
             {(
               [
                 ["short", "三行摘要", summary.short],
