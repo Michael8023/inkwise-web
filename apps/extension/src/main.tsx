@@ -95,6 +95,27 @@ function normalizeDisplayMath(markdown: string) {
   return markdown.replace(/(^|\n)\$\$\s*([^\n]+?)\s*\$\$(?=\n|$)/g, (_match, prefix, source) => `${prefix}$$\n${source.trim()}\n$$`);
 }
 
+function normalizeBareMath(markdown: string) {
+  const lines = markdown.replace(/\\\(([^\n]+?)\\\)/g, "$$$1$$").replace(/\\\[([\s\S]+?)\\\]/g, "\n$$\n$1\n$$\n").split("\n");
+  const mathLine = (line: string) => {
+    const value = line.trim();
+    if (!value || /^[-*•]\s/.test(value) || /^\d+[.)]\s/.test(value) || value.startsWith("$$")) return false;
+    const commands = /\\(?:sum|frac|cdot|l(?:Vert|vert)|phi|theta|mathbf|text|begin|end)|(?:^|\s)(?:sum|prod|int)_[{\w]|:=|[|]{2}|[∑∫±≤≥]/.test(value);
+    const operators = (value.match(/(?:\s[=+*/-]\s|:=|\|\|)/g) || []).length;
+    return commands || operators >= 3;
+  };
+  const output: string[] = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const current = lines[index];
+    if (!mathLine(current)) { output.push(current); continue; }
+    const formula = [current.trim()];
+    while (index + 1 < lines.length && lines[index + 1].trim() && mathLine(lines[index + 1])) formula.push(lines[++index].trim());
+    const source = formula.join(" ").replace(/(^|\s)(sum|prod|int|lim|log|exp|sin|cos)(?=_|\s*\{)/g, "$1\\$2");
+    output.push(`$$\n${source}\n$$`);
+  }
+  return output.join("\n");
+}
+
 function FormulaSpan({ node, children, dataFormulaSource: _source, dataFormulaDisplay: _display, ...props }: any) {
   const source = typeof node?.properties?.dataFormulaSource === "string" ? node.properties.dataFormulaSource : "";
   const display = node?.properties?.dataFormulaDisplay === "true";
@@ -111,7 +132,7 @@ function AiMarkdown({ children }: { children: string }) {
     components={{
       span: FormulaSpan,
     }}
-  >{normalizeDisplayMath(children)}</ReactMarkdown>;
+  >{normalizeBareMath(normalizeDisplayMath(children))}</ReactMarkdown>;
 }
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
