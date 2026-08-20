@@ -212,6 +212,7 @@ const MAX_PDF_IMPORT_BYTES = 128 * 1024 * 1024;
 const MAX_LIBRARY_PDF_BYTES = 50 * 1024 * 1024;
 const FREE_MINERU_UPLOAD_BYTES = 15 * 1024 * 1024;
 const PRO_MINERU_UPLOAD_BYTES = 50 * 1024 * 1024;
+const MINERU_LAYOUT_COORDINATE_VERSION = 2;
 
 async function contentHash(bytes: ArrayBuffer) {
   const digest = await crypto.subtle.digest("SHA-256", bytes);
@@ -378,6 +379,28 @@ function mineruBox(value: unknown): [number, number, number, number] | null {
 
 function collectMineruRegions(value: unknown, pageSizes: Array<{ width: number; height: number }>): VisualRegion[] {
   const found: VisualRegion[] = [];
+  const pageCoordinateMax = new Map<number, { x: number; y: number }>();
+  const scanBoxes = (node: any, inheritedPage?: number) => {
+    if (!node || typeof node !== "object") return;
+    if (Array.isArray(node)) { node.forEach(item => scanBoxes(item, inheritedPage)); return; }
+    const page = Number(node.page_idx ?? node.page_id ?? node.page_no ?? node.page ?? inheritedPage);
+    const box = mineruBox(node.bbox || node.box || node.bounding_box || node.poly);
+    if (box && Number.isInteger(page) && page >= 0 && page < pageSizes.length) {
+      const current = pageCoordinateMax.get(page) || { x: 0, y: 0 };
+      current.x = Math.max(current.x, box[2]); current.y = Math.max(current.y, box[3]);
+      pageCoordinateMax.set(page, current);
+    }
+    Object.entries(node).forEach(([key, child]) => { if (!["bbox", "box", "bounding_box", "poly"].includes(key)) scanBoxes(child, page); });
+  };
+  scanBoxes(value);
+  const pageCoordinateScale = new Map<number, number>();
+  pageCoordinateMax.forEach((max, page) => {
+    const size = pageSizes[page];
+    const ratio = Math.max(max.x / size.width, max.y / size.height);
+    // MinerU commonly reports boxes in rendered-image coordinates while PDF.js
+    // exposes points. Calibrate per page before normalizing to percentages.
+    pageCoordinateScale.set(page, ratio > 1.12 ? ratio : 1);
+  });
   const kindForNode = (node: any, key = ""): Pick<VisualRegion, "kind" | "captionFor"> | null => {
     const label = `${node.type || node.category || node.block_type || node.layout_type || node.label || ""} ${key}`.toLowerCase();
     if (/image_caption|figure_caption|fig_caption/.test(label)) return { kind: "caption", captionFor: "image" };
@@ -412,7 +435,8 @@ function collectMineruRegions(value: unknown, pageSizes: Array<{ width: number; 
     const page = Number(node.page_idx ?? node.page_id ?? node.page_no ?? node.page ?? inheritedPage);
     const box = mineruBox(node.bbox || node.box || node.bounding_box || node.poly);
     if (regionType && box && Number.isInteger(page) && page >= 0 && page < pageSizes.length) {
-      const size = pageSizes[page]; const [x0, y0, x1, y1] = box;
+      const size = pageSizes[page]; const coordinateScale = pageCoordinateScale.get(page) || 1;
+      const [x0, y0, x1, y1] = box.map(point => point / coordinateScale) as [number, number, number, number];
       const area = { x: Math.max(0, x0 / size.width), y: Math.max(0, y0 / size.height), width: Math.min(1, (x1 - x0) / size.width), height: Math.min(1, (y1 - y0) / size.height) };
       if (area.width > .01 && area.height > .01) found.push({ id: crypto.randomUUID(), ...regionType, content: regionType.kind === "formula" ? formulaContent(node) : undefined, area, pageNumber: page + 1 });
     }
@@ -2022,8 +2046,9 @@ function App() {
     setVisualSelections(Array.isArray(state.visualSelections) ? state.visualSelections as VisualSelection[] : []);
     setMessages(Array.isArray(state.messages) ? state.messages as ChatMessage[] : []);
     setSummary(state.summary && typeof state.summary === "object" ? state.summary as { short?: string; full?: string } : {});
-    setMineruRegions(Array.isArray(layout.regions) ? layout.regions as VisualRegion[] : []);
-    setMineruReady(Boolean(layout.ready));
+    const hasCurrentLayoutCoordinates = Number(layout.coordinateVersion) === MINERU_LAYOUT_COORDINATE_VERSION;
+    setMineruRegions(hasCurrentLayoutCoordinates && Array.isArray(layout.regions) ? layout.regions as VisualRegion[] : []);
+    setMineruReady(Boolean(layout.ready) && hasCurrentLayoutCoordinates);
     setDetectedDocumentTitle(typeof layout.documentTitle === "string" ? layout.documentTitle : "", true);
     if (Array.isArray(layout.outline) && layout.outline.length) setOutline(layout.outline as OutlineItem[]);
     setPaperStateLoaded(true);
@@ -2039,7 +2064,7 @@ function App() {
       currentPage, scale, highlights, selections, visualSelections: [], messages,
       summary: { short: summary.short, full: summary.full },
     };
-    const layoutResult = mineruReady ? { ready: true, regions: mineruRegions, outline, documentTitle: documentTitle || null } : null;
+    const layoutResult = mineruReady ? { ready: true, coordinateVersion: MINERU_LAYOUT_COORDINATE_VERSION, regions: mineruRegions, outline, documentTitle: documentTitle || null } : null;
     const { error } = await supabase.rpc("save_library_paper_state", {
       p_paper_id: currentPaperId,
       p_reader_state: sanitizeCloudValue(readerState),
