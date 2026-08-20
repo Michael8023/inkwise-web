@@ -91,44 +91,6 @@ function rehypeFormulaMetadata() {
   };
 }
 
-function normalizeDisplayMath(markdown: string) {
-  const lines = markdown.split("\n");
-  let inDisplay = false;
-  return lines.map(line => {
-    if (line.trim() === "$$") { inDisplay = !inDisplay; return line; }
-    return inDisplay ? sanitizeMathSource(line) : line;
-  }).join("\n").replace(/(^|\n)\$\$\s*([^\n]+?)\s*\$\$(?=\n|$)/g, (_match, prefix, source) => `${prefix}$$\n${sanitizeMathSource(source)}\n$$`);
-}
-
-function sanitizeMathSource(value: string) {
-  let source = value.trim().replace(/^[`'‘’“”"«»]+|[`'‘’“”"«»]+$/g, "");
-  let openingNorm = true;
-  source = source.replace(/\|\|/g, () => openingNorm ? (openingNorm = false, "\\lVert ") : (openingNorm = true, " \\rVert"));
-  return source.replace(/[“”‘’]/g, "").replace(/\bminimize\b/g, "\\operatorname{minimize}").replace(/\bsg(?=\s*\()/g, "\\operatorname{sg}");
-}
-
-function normalizeBareMath(markdown: string) {
-  const lines = markdown.replace(/\\\(([^\n]+?)\\\)/g, "$$$1$$").replace(/\\\[([\s\S]+?)\\\]/g, "\n$$\n$1\n$$\n").split("\n");
-  const mathLine = (line: string) => {
-    const value = line.trim();
-    if (!value || /[`]|[\u4e00-\u9fff]/.test(value) || /^[-*•]\s/.test(value) || /^\d+[.)]\s/.test(value) || value.startsWith("$$")) return false;
-    const commands = /\\(?:sum|frac|cdot|l(?:Vert|vert)|phi|theta|mathbf|text|begin|end)|(?:^|\s)(?:sum|prod|int)_[{\w]|:=|[|]{2}|[∑∫±≤≥]/.test(value);
-    const operators = (value.match(/(?:\s[=+*/-]\s|:=|\|\|)/g) || []).length;
-    const normPair = (value.match(/\|\|/g) || []).length >= 1;
-    return (commands || operators >= 3 || (normPair && /[=]/.test(value))) && /^[A-Za-z0-9_{}\\^(),.;:+*/=|<>\-–—−\sφϕθΔ∈≤≥∑∫]+$/.test(value);
-  };
-  const output: string[] = [];
-  for (let index = 0; index < lines.length; index += 1) {
-    const current = lines[index];
-    if (!mathLine(current)) { output.push(current); continue; }
-    const formula = [current.trim()];
-    while (index + 1 < lines.length && lines[index + 1].trim() && mathLine(lines[index + 1])) formula.push(lines[++index].trim());
-    const source = sanitizeMathSource(formula.join(" ")).replace(/(^|\s)(sum|prod|int|lim|log|exp|sin|cos)(?=_|\s*\{)/g, "$1\\$2");
-    output.push(`$$\n${source}\n$$`);
-  }
-  return output.join("\n");
-}
-
 function FormulaSpan({ node, children, dataFormulaSource: _source, dataFormulaDisplay: _display, ...props }: any) {
   const source = typeof node?.properties?.dataFormulaSource === "string" ? node.properties.dataFormulaSource : "";
   const display = node?.properties?.dataFormulaDisplay === "true";
@@ -145,7 +107,7 @@ function AiMarkdown({ children }: { children: string }) {
     components={{
       span: FormulaSpan,
     }}
-  >{normalizeBareMath(normalizeDisplayMath(children))}</ReactMarkdown>;
+  >{children}</ReactMarkdown>;
 }
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
