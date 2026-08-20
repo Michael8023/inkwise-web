@@ -92,7 +92,14 @@ function rehypeFormulaMetadata() {
 }
 
 function normalizeDisplayMath(markdown: string) {
-  return markdown.replace(/(^|\n)\$\$\s*([^\n]+?)\s*\$\$(?=\n|$)/g, (_match, prefix, source) => `${prefix}$$\n${source.trim()}\n$$`);
+  return markdown.replace(/(^|\n)\$\$\s*([\s\S]+?)\s*\$$(?=\n|$)/g, (_match, prefix, source) => `${prefix}$$\n${sanitizeMathSource(source)}\n$$`);
+}
+
+function sanitizeMathSource(value: string) {
+  let source = value.trim().replace(/^[`'‘’“”"«»]+|[`'‘’“”"«»]+$/g, "");
+  let openingNorm = true;
+  source = source.replace(/\|\|/g, () => openingNorm ? (openingNorm = false, "\\lVert ") : (openingNorm = true, " \\rVert"));
+  return source.replace(/[“”‘’]/g, "");
 }
 
 function normalizeBareMath(markdown: string) {
@@ -110,7 +117,7 @@ function normalizeBareMath(markdown: string) {
     if (!mathLine(current)) { output.push(current); continue; }
     const formula = [current.trim()];
     while (index + 1 < lines.length && lines[index + 1].trim() && mathLine(lines[index + 1])) formula.push(lines[++index].trim());
-    const source = formula.join(" ").replace(/(^|\s)(sum|prod|int|lim|log|exp|sin|cos)(?=_|\s*\{)/g, "$1\\$2");
+    const source = sanitizeMathSource(formula.join(" ")).replace(/(^|\s)(sum|prod|int|lim|log|exp|sin|cos)(?=_|\s*\{)/g, "$1\\$2");
     output.push(`$$\n${source}\n$$`);
   }
   return output.join("\n");

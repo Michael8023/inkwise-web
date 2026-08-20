@@ -15,7 +15,7 @@ Deno.serve(async req => {
     const model = modelOrDefault(String(payload.model || ""));
     const charge = await reserve(req, "chat", model, Math.max(1, Math.ceil((documentContext.length + JSON.stringify(messages).length) / 60000)), requestId, documentContext.length);
     reserved = true;
-    const upstream = await completionStream(model, [{ role: "system", content: `你是 PDF 文档问答助手，只能根据以下文档回答，无法确认时明确说明。公式必须使用标准 LaTeX：行内公式用 $...$，独立公式用 $$...$$ 并单独成行；绝不输出未包裹定界符的裸 LaTeX。\n\n文档：\n${documentContext}` }, ...messages], 1200);
+    const upstream = await completionStream(model, [{ role: "system", content: `你是 PDF 文档问答助手，只能根据以下文档回答，无法确认时明确说明。公式必须使用可编译的标准 LaTeX：行内公式用 $...$，独立公式用 $$...$$ 并单独成行。不要使用中文/智能引号或反引号包裹公式；下标必须写为 _{...}；文字说明必须写为 \\text{...} 或 \\mathrm{...}；范数必须写为 \\lVert x \\rVert，绝不输出未包裹定界符的裸 LaTeX。\n\n文档：\n${documentContext}` }, ...messages], 1200);
     const stream = new ReadableStream({
       async start(controller) {
         const reader = upstream.body!.getReader(), decoder = new TextDecoder(); let buffer = "", answer = "";
