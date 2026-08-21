@@ -10,7 +10,10 @@
     "dev:extension": "npm --workspace apps/extension run dev",
     "build:extension": "npm --workspace apps/extension run build",
     "dev:api": "npm --workspace apps/api run dev",
-    "test": "npm run test --workspaces"
+    "test": "npm run test --workspaces",
+    "dev:mobile": "npm --workspace @pdf-ai-reader/mobile run start",
+    "build:mobile": "npm --workspace @pdf-ai-reader/mobile run build:reader",
+    "typecheck:mobile": "npm --workspace @pdf-ai-reader/mobile run typecheck"
   },
   "dependencies": {
     "three": "^0.185.1"

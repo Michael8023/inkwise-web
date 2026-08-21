@@ -1,0 +1,1579 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>识谛 · 移动端交互原型</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,300,0,0" />
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+    background: #E7ECEA;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 32px 16px;
+    min-height: 100vh;
+  }
+  .msym { font-family: 'Material Symbols Outlined'; font-weight: 300; font-style: normal; display: inline-block; line-height: 1; vertical-align: middle; -webkit-font-smoothing: antialiased; }
+
+  /* ---------- Theme tokens ---------- */
+  #app-root[data-theme="light"] {
+    --c-primary:#063477; --c-accent:#078B8E; --c-bg:#F4FBFA; --c-paper:#FFFFFF;
+    --c-text:#102F4B; --c-text2:#597083; --c-text3:#94A6B3; --c-cite:#B7791F;
+    --c-danger:#C0392F; --c-border:#E4EDEC; --c-chip:#F4FBFA; --c-shadow:0 1px 2px rgba(6,52,119,0.06);
+    --c-statusbar:#102F4B;
+  }
+  #app-root[data-theme="dark"] {
+    --c-primary:#6FA8E0; --c-accent:#3FC9C2; --c-bg:#0C1B27; --c-paper:#132639;
+    --c-text:#E7F0F5; --c-text2:#96ABBC; --c-text3:#5D7286; --c-cite:#E3AD58;
+    --c-danger:#E68078; --c-border:#213A4C; --c-chip:#0F2536; --c-shadow:none;
+    --c-statusbar:#E7F0F5;
+  }
+
+  /* ---------- Phone frame ---------- */
+  #app-root { --fs:16px; }
+  .device {
+    width: 390px;
+    max-width: 100vw;
+    height: 820px;
+    background: var(--c-bg);
+    border-radius: 40px;
+    border: 8px solid #1b1b1b;
+    overflow: hidden;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 20px 50px rgba(0,0,0,0.25);
+    font-size: var(--fs);
+    color: var(--c-text);
+  }
+  .statusbar {
+    display:flex; justify-content:space-between; align-items:center;
+    padding: 10px 22px 4px; font-size: 12px; font-weight: 500; color: var(--c-statusbar); flex-shrink:0;
+  }
+  .statusbar .icons { display:flex; gap:5px; align-items:center; }
+  .statusbar .msym { font-size:15px; }
+
+  .screens { position:relative; flex:1; min-height:0; }
+  .screen {
+    position:absolute; inset:0; display:flex; flex-direction:column;
+    background: var(--c-bg);
+    transform: translateX(0); transition: transform .22s ease;
+  }
+  .screen.hidden { display:none; }
+  .screen-scroll { flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; }
+  .screen-scroll::-webkit-scrollbar { width:0; }
+
+  /* pushed sub-screens slide in */
+  .pushed { z-index:5; }
+
+  /* ---------- Top bars ---------- */
+  .topbar {
+    padding: 6px 16px 10px; flex-shrink:0; background:var(--c-bg);
+  }
+  .topbar-row { display:flex; justify-content:space-between; align-items:center; }
+  .page-title { font-size:22px; font-weight:500; color:var(--c-primary); }
+  .page-sub { font-size:12px; color:var(--c-text2); margin-top:2px; }
+  .icon-btn {
+    width:36px; height:36px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+    background: var(--c-paper); border:0.5px solid var(--c-border); color:var(--c-text); cursor:pointer;
+    flex-shrink:0;
+  }
+  .icon-btn.accent { background: var(--c-accent); color:#fff; border:none; }
+  .icon-btn:active { transform: scale(0.94); }
+  .topbar-actions { display:flex; gap:8px; }
+
+  .detail-header {
+    display:flex; align-items:center; justify-content:space-between; padding:10px 16px; flex-shrink:0;
+  }
+  .detail-header .center { flex:1; min-width:0; padding:0 10px; }
+  .detail-header .center .t { font-size:13px; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .detail-header .center .s { font-size:11px; color:var(--c-text2); }
+  .back-btn { color: var(--c-text); cursor:pointer; display:flex; }
+  .back-btn .msym { font-size:22px; }
+
+  /* ---------- Search ---------- */
+  .search-bar {
+    display:none; align-items:center; gap:8px; background:var(--c-paper); border:0.5px solid var(--c-border);
+    border-radius: 10px; padding: 8px 12px; margin-top:8px;
+  }
+  .search-bar.open { display:flex; }
+  .search-bar input { border:none; outline:none; background:transparent; flex:1; font-size:14px; color:var(--c-text); font-family:inherit; }
+  .search-bar .msym { font-size:18px; color:var(--c-text2); }
+
+  /* ---------- Filter chips ---------- */
+  .chip-row { display:flex; gap:8px; overflow-x:auto; padding: 10px 16px 4px; flex-shrink:0; }
+  .chip-row::-webkit-scrollbar { display:none; }
+  .chip {
+    flex-shrink:0; padding:6px 14px; border-radius:16px; font-size:13px; cursor:pointer;
+    background: var(--c-paper); border:0.5px solid var(--c-border); color:var(--c-text2); white-space:nowrap;
+  }
+  .chip.active { background: var(--c-primary); color:#fff; border-color:var(--c-primary); }
+
+  /* ---------- Literature list ---------- */
+  .lit-list { padding: 4px 16px 90px; display:flex; flex-direction:column; gap:8px; }
+  .lit-item {
+    background: var(--c-paper); border:0.5px solid var(--c-border); border-radius:10px; padding:12px;
+    box-shadow: var(--c-shadow); cursor:pointer; position:relative;
+  }
+  .lit-item .row1 { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; }
+  .lit-item .title { font-size:15px; font-weight:500; line-height:1.4; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  .lit-item .meta { font-size:12px; color:var(--c-text2); margin-top:4px; }
+  .lit-item .row3 { display:flex; align-items:center; gap:6px; margin-top:9px; flex-wrap:wrap; }
+  .tag { font-size:11px; padding:2px 8px; border-radius:6px; background:var(--c-chip); color:var(--c-accent); }
+  .status-label { font-size:11px; color:var(--c-text3); margin-left:auto; display:flex; align-items:center; gap:4px; }
+  .icon-mini { font-size:15px; cursor:pointer; color:var(--c-text3); flex-shrink:0; }
+  .icon-mini.fav-on { color:#B7791F; font-variation-settings: 'FILL' 1; }
+  .icon-mini.more { color:var(--c-text2); }
+  .checkbox-mini {
+    width:18px; height:18px; border-radius:5px; border:1.5px solid var(--c-border); flex-shrink:0;
+    display:flex; align-items:center; justify-content:center; margin-right:8px;
+  }
+  .checkbox-mini.checked { background:var(--c-accent); border-color:var(--c-accent); color:#fff; }
+  .checkbox-mini .msym { font-size:13px; }
+  .lit-item-inner { display:flex; align-items:flex-start; }
+  .lit-item-body { flex:1; min-width:0; }
+
+  .empty-state { padding: 60px 32px; text-align:center; color:var(--c-text2); }
+  .empty-state .msym { font-size:42px; color:var(--c-text3); margin-bottom:10px; }
+  .empty-state .t { font-size:15px; color:var(--c-text); font-weight:500; margin-bottom:4px; }
+  .empty-state .s { font-size:13px; margin-bottom:18px; }
+  .empty-actions { display:flex; gap:10px; justify-content:center; }
+  .btn {
+    padding:9px 16px; border-radius:8px; font-size:13px; cursor:pointer; border:0.5px solid var(--c-border);
+    background: var(--c-paper); color:var(--c-text); display:inline-flex; align-items:center; gap:6px;
+  }
+  .btn.primary { background: var(--c-accent); color:#fff; border:none; }
+  .btn:active { transform: scale(0.97); }
+
+  /* batch action bar */
+  .batch-bar {
+    position:absolute; left:16px; right:16px; bottom:78px; background:var(--c-primary); color:#fff;
+    border-radius:12px; padding:10px 14px; display:none; align-items:center; justify-content:space-between;
+    box-shadow:0 6px 18px rgba(0,0,0,0.2); z-index:8;
+  }
+  .batch-bar.show { display:flex; }
+  .batch-bar .left { font-size:13px; }
+  .batch-bar .acts { display:flex; gap:16px; }
+  .batch-bar .acts .msym { font-size:19px; cursor:pointer; }
+
+  /* dropdown menu */
+  .dropdown {
+    position: fixed; background: var(--c-paper); border:0.5px solid var(--c-border); border-radius:10px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.18); min-width:150px; z-index:60; overflow:hidden; display:none;
+  }
+  .dropdown.show { display:block; }
+  .dropdown .item { padding:11px 14px; font-size:13px; display:flex; align-items:center; gap:8px; cursor:pointer; color:var(--c-text); }
+  .dropdown .item:hover { background: var(--c-bg); }
+  .dropdown .item.danger { color: var(--c-danger); }
+  .dropdown .msym { font-size:16px; }
+
+  /* ---------- Bottom nav ---------- */
+  .bottomnav {
+    display:flex; justify-content:space-around; align-items:center; padding:9px 0 12px;
+    background: var(--c-paper); border-top:0.5px solid var(--c-border); flex-shrink:0; position:relative; z-index:6;
+  }
+  .nav-item { display:flex; flex-direction:column; align-items:center; gap:2px; color:var(--c-text2); cursor:pointer; }
+  .nav-item.active { color: var(--c-accent); }
+  .nav-item .msym { font-size:22px; }
+  .nav-item span.lbl { font-size:10.5px; }
+
+  /* ---------- Import sheet ---------- */
+  .overlay { position:absolute; inset:0; background:rgba(6,20,32,0.45); z-index:20; display:none; }
+  .overlay.show { display:block; }
+  .sheet {
+    position:absolute; left:0; right:0; bottom:0; background:var(--c-paper); border-radius:20px 20px 0 0;
+    padding:10px 18px 22px; transform: translateY(100%); transition: transform .25s ease; max-height:82%; overflow-y:auto;
+  }
+  .sheet.show { transform: translateY(0); }
+  .sheet-handle { width:36px; height:4px; background:var(--c-border); border-radius:2px; margin:4px auto 14px; }
+  .sheet-title { font-size:16px; font-weight:500; margin-bottom:14px; }
+  .import-tabs { display:flex; gap:8px; margin-bottom:16px; }
+  .import-tab { flex:1; text-align:center; padding:9px 0; border-radius:8px; font-size:13px; border:0.5px solid var(--c-border); color:var(--c-text2); cursor:pointer; }
+  .import-tab.active { background: var(--c-bg); color:var(--c-primary); border-color:var(--c-accent); font-weight:500; }
+  .import-pane { display:none; }
+  .import-pane.active { display:block; }
+  .dropzone {
+    border:1.5px dashed var(--c-border); border-radius:12px; padding:28px 16px; text-align:center; color:var(--c-text2); cursor:pointer;
+  }
+  .dropzone .msym { font-size:30px; color:var(--c-accent); margin-bottom:8px; }
+  .field { margin-bottom:12px; }
+  .field label { font-size:12px; color:var(--c-text2); display:block; margin-bottom:5px; }
+  .field input, .field select, .field textarea {
+    width:100%; padding:9px 12px; border-radius:8px; border:0.5px solid var(--c-border); background:var(--c-bg);
+    font-size:14px; color:var(--c-text); font-family:inherit; outline:none;
+  }
+  .progress-list { display:flex; flex-direction:column; gap:12px; padding: 6px 0 4px; }
+  .progress-step { display:flex; align-items:center; gap:10px; font-size:13px; color:var(--c-text2); }
+  .progress-step .dot {
+    width:20px; height:20px; border-radius:50%; border:1.5px solid var(--c-border); flex-shrink:0;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .progress-step.active .dot { border-color:var(--c-accent); }
+  .progress-step.active { color: var(--c-text); }
+  .progress-step.done .dot { background:var(--c-accent); border-color:var(--c-accent); color:#fff; }
+  .progress-step.done { color: var(--c-text); }
+  .progress-step .dot .msym { font-size:13px; }
+  .spinner {
+    width:11px; height:11px; border:2px solid var(--c-border); border-top-color:var(--c-accent); border-radius:50%;
+    animation: spin .7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ---------- Skim / digest ---------- */
+  .skim-list { padding: 4px 16px 90px; display:flex; flex-direction:column; gap:14px; }
+  .skim-card { background:var(--c-paper); border:0.5px solid var(--c-border); border-radius:10px; padding:14px; box-shadow:var(--c-shadow); }
+  .skim-card.dim { opacity:0.5; }
+  .skim-card .title { font-size:15px; font-weight:500; line-height:1.4; cursor:pointer; }
+  .skim-card .meta { font-size:12px; color:var(--c-text2); margin-top:3px; }
+  .skim-toggle { display:flex; gap:6px; margin-top:10px; }
+  .skim-toggle .opt { font-size:12px; padding:3px 11px; border-radius:14px; cursor:pointer; background:var(--c-chip); color:var(--c-text2); }
+  .skim-toggle .opt.active { background:var(--c-primary); color:#fff; }
+  .skim-oneline { font-size:14px; color:var(--c-text); line-height:1.65; margin-top:10px; }
+  .skim-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:12px; }
+  .skim-grid .cell { background:var(--c-bg); border-radius:6px; padding:8px 10px; }
+  .skim-grid .cell .k { font-size:11px; color:var(--c-accent); font-weight:500; }
+  .skim-grid .cell .v { font-size:12px; color:var(--c-text); margin-top:2px; line-height:1.45; }
+  .skim-followups { margin-top:12px; }
+  .skim-followups .lbl { font-size:12px; color:var(--c-text2); margin-bottom:6px; }
+  .followup-chip {
+    font-size:13px; color:var(--c-accent); padding:7px 10px; background:var(--c-bg); border-radius:6px;
+    display:flex; align-items:center; justify-content:space-between; cursor:pointer; margin-bottom:6px;
+  }
+  .followup-chip .msym { font-size:15px; }
+  .skim-actions { display:flex; gap:16px; margin-top:12px; padding-top:10px; border-top:0.5px solid var(--c-border); color:var(--c-text2); align-items:center; }
+  .skim-actions .msym { font-size:18px; cursor:pointer; }
+  .skim-actions .msym.on { color:#B7791F; font-variation-settings:'FILL' 1; }
+  .skim-actions .msym.read-on { color: var(--c-accent); font-variation-settings:'FILL' 1; }
+  .skim-footnote { font-size:11px; color:var(--c-text3); margin-top:9px; display:flex; align-items:center; gap:5px; cursor:pointer; }
+
+  /* ---------- Detail tabs ---------- */
+  .detail-meta { padding: 0 16px 10px; }
+  .detail-meta .t { font-size:18px; font-weight:500; color:var(--c-primary); line-height:1.4; }
+  .detail-meta .m { font-size:12px; color:var(--c-text2); margin-top:6px; }
+  .detail-meta .doi { font-size:11px; color:var(--c-text3); margin-top:2px; }
+  .detail-meta .tagrow { display:flex; gap:6px; margin-top:8px; flex-wrap:wrap; }
+  .tag.outline { background:var(--c-paper); border:0.5px solid var(--c-border); }
+
+  .tabbar { display:flex; background:var(--c-paper); border-top:0.5px solid var(--c-border); border-bottom:0.5px solid var(--c-border); flex-shrink:0; }
+  .tabbar .tab { flex:1; text-align:center; padding:11px 0; font-size:14px; color:var(--c-text2); cursor:pointer; border-bottom:2px solid transparent; }
+  .tabbar .tab.active { color:var(--c-primary); font-weight:500; border-bottom-color:var(--c-accent); }
+
+  .detail-panes { flex:1; min-height:0; position:relative; }
+  .detail-pane { position:absolute; inset:0; overflow-y:auto; display:none; padding: 14px 16px 20px; }
+  .detail-pane.active { display:block; }
+
+  .info-card { background:var(--c-paper); border:0.5px solid var(--c-border); border-radius:10px; padding:12px; margin-bottom:12px; box-shadow:var(--c-shadow); }
+  .info-card .k { font-size:12px; color:var(--c-accent); font-weight:500; }
+  .info-card .v { font-size:13px; color:var(--c-text); line-height:1.6; margin-top:4px; }
+  .cite-link { color:var(--c-cite); text-decoration:underline; text-underline-offset:2px; cursor:pointer; }
+
+  /* notes */
+  .note-item { background:var(--c-paper); border:0.5px solid var(--c-border); border-radius:10px; padding:12px; margin-bottom:10px; }
+  .note-item .h { display:flex; justify-content:space-between; align-items:center; margin-bottom:5px; }
+  .note-item .tagtype { font-size:11px; padding:1px 7px; border-radius:5px; }
+  .note-item .tagtype.user { background:var(--c-chip); color:var(--c-accent); }
+  .note-item .tagtype.ai { background:var(--c-chip); color:var(--c-primary); }
+  .note-item .tagtype.excerpt { background:var(--c-chip); color:var(--c-cite); }
+  .note-item .time { font-size:11px; color:var(--c-text3); }
+  .note-item .c { font-size:13px; color:var(--c-text); line-height:1.6; }
+  .note-add { display:flex; gap:8px; margin-bottom:14px; }
+  .note-add textarea { flex:1; resize:none; height:38px; padding:8px 10px; border-radius:8px; border:0.5px solid var(--c-border); background:var(--c-paper); font-size:13px; font-family:inherit; color:var(--c-text); outline:none; }
+
+  /* pdf pane */
+  .pdf-toolbar { display:flex; align-items:center; gap:8px; margin-bottom:10px; }
+  .pdf-toolbar input { flex:1; padding:7px 10px; border-radius:8px; border:0.5px solid var(--c-border); background:var(--c-paper); font-size:13px; color:var(--c-text); outline:none; }
+  .pdf-toolbar .msym { font-size:19px; color:var(--c-text2); cursor:pointer; }
+  .pdf-page {
+    background:#fff; border:0.5px solid var(--c-border); border-radius:8px; padding:24px 18px; min-height:420px;
+    transform-origin: top center; transition: transform .15s ease;
+  }
+  .pdf-page .ln { height:8px; background:#EDF1F0; border-radius:3px; margin-bottom:10px; }
+  .pdf-page .ln.short { width:60%; }
+  .pdf-highlight { background:#FBEED2; border-left:3px solid var(--c-cite); padding:8px 10px; margin: 14px 0; border-radius:0 6px 6px 0; animation: flash 1.8s ease; }
+  @keyframes flash { 0%{ background:#F6D890; } 100%{ background:#FBEED2; } }
+  .pdf-highlight .txt { font-size:12px; color:#3a3a3a; line-height:1.6; }
+  .pdf-pagenav { display:flex; align-items:center; justify-content:center; gap:14px; margin-top:12px; color:var(--c-text2); font-size:13px; }
+  .pdf-pagenav .msym { font-size:20px; cursor:pointer; }
+
+  /* ---------- Chat ---------- */
+  .chat-context { padding:10px 16px; display:flex; gap:6px; flex-wrap:wrap; background:var(--c-paper); border-bottom:0.5px solid var(--c-border); }
+  .ctx-chip { font-size:12px; background:var(--c-chip); color:var(--c-primary); padding:4px 8px 4px 10px; border-radius:12px; display:flex; align-items:center; gap:5px; }
+  .ctx-chip .msym { font-size:14px; cursor:pointer; }
+  .chat-scroll { flex:1; overflow-y:auto; padding:14px 16px; display:flex; flex-direction:column; gap:12px; }
+  .msg { max-width:82%; font-size:14px; line-height:1.6; }
+  .msg.user { align-self:flex-end; background:var(--c-primary); color:#fff; padding:9px 12px; border-radius:10px 10px 2px 10px; }
+  .msg.ai { align-self:flex-start; color:var(--c-text); }
+  .msg.ai .actions { display:flex; gap:14px; margin-top:8px; color:var(--c-text2); }
+  .msg.ai .actions .msym { font-size:15px; cursor:pointer; }
+  .msg.unsure { align-self:flex-start; max-width:85%; border:0.5px solid var(--c-border); border-radius:10px; padding:10px 12px; background:var(--c-paper); }
+  .msg.unsure .h { font-size:12px; color:var(--c-danger); display:flex; align-items:center; gap:6px; }
+  .msg.unsure .h .msym { font-size:15px; }
+  .msg.unsure .b { font-size:13px; color:var(--c-text2); margin-top:4px; line-height:1.6; }
+  .typing { align-self:flex-start; display:flex; gap:4px; padding:6px 0; }
+  .typing span { width:6px; height:6px; border-radius:50%; background:var(--c-text3); animation: bounce 1.1s infinite; }
+  .typing span:nth-child(2){ animation-delay:.15s; } .typing span:nth-child(3){ animation-delay:.3s; }
+  @keyframes bounce { 0%,60%,100%{ transform:translateY(0); opacity:.5;} 30%{ transform:translateY(-4px); opacity:1;} }
+  .quickrow { display:flex; gap:8px; overflow-x:auto; padding: 0 16px 10px; flex-shrink:0; }
+  .quickrow::-webkit-scrollbar{display:none;}
+  .quick-chip { flex-shrink:0; font-size:12px; color:var(--c-accent); padding:6px 12px; border:0.5px solid var(--c-accent); border-radius:14px; cursor:pointer; white-space:nowrap; }
+  .chat-input-bar { display:flex; align-items:center; gap:8px; padding:8px 16px 14px; background:var(--c-paper); border-top:0.5px solid var(--c-border); flex-shrink:0; }
+  .chat-input-bar input { flex:1; background:var(--c-bg); border:none; border-radius:18px; padding:10px 14px; font-size:13px; color:var(--c-text); outline:none; font-family:inherit; }
+  .chat-input-bar .msym { font-size:20px; color:var(--c-text2); cursor:pointer; flex-shrink:0; }
+  .chat-input-bar .mic.recording { color: var(--c-danger); }
+  .send-btn { width:32px; height:32px; border-radius:50%; background:var(--c-accent); display:flex; align-items:center; justify-content:center; flex-shrink:0; cursor:pointer; }
+  .send-btn .msym { color:#fff; font-size:16px; }
+
+  /* AI hub */
+  .ai-hub { padding: 4px 16px 90px; }
+  .thread-card { background:var(--c-paper); border:0.5px solid var(--c-border); border-radius:10px; padding:12px 14px; margin-bottom:16px; }
+  .thread-card .k { font-size:11px; color:var(--c-text2); }
+  .thread-card .v { font-size:13px; color:var(--c-text); margin-top:3px; line-height:1.55; }
+  .entry-grid { display:flex; flex-direction:column; gap:10px; margin-bottom:20px; }
+  .entry-card { background:var(--c-paper); border:0.5px solid var(--c-border); border-radius:10px; padding:14px; display:flex; align-items:center; gap:12px; cursor:pointer; box-shadow:var(--c-shadow); }
+  .entry-card .ic { width:38px; height:38px; border-radius:9px; background:var(--c-chip); color:var(--c-accent); display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+  .entry-card .ic .msym { font-size:20px; }
+  .entry-card .tt { font-size:14px; font-weight:500; }
+  .entry-card .ss { font-size:12px; color:var(--c-text2); margin-top:2px; }
+  .entry-card .arrow { margin-left:auto; color:var(--c-text3); }
+  .section-lbl { font-size:12px; color:var(--c-text2); margin-bottom:8px; }
+  .session-item { background:var(--c-paper); border:0.5px solid var(--c-border); border-radius:10px; padding:11px 12px; margin-bottom:8px; cursor:pointer; }
+  .session-item .tt { font-size:13.5px; font-weight:500; }
+  .session-item .ss { font-size:11.5px; color:var(--c-text2); margin-top:3px; }
+
+  /* picker modal */
+  .picker-list { max-height: 44vh; overflow-y:auto; margin: 4px 0 14px; }
+  .picker-item { display:flex; align-items:center; gap:10px; padding:10px 4px; border-bottom:0.5px solid var(--c-border); cursor:pointer; }
+  .picker-item .tt { font-size:13.5px; color:var(--c-text); flex:1; }
+  .picker-item .ss { font-size:11.5px; color:var(--c-text2); }
+
+  /* ---------- Profile ---------- */
+  .profile-scroll { padding: 4px 16px 90px; }
+  .p-card { background:var(--c-paper); border:0.5px solid var(--c-border); border-radius:12px; padding:14px 16px; margin-bottom:14px; }
+  .p-card .h { font-size:14px; font-weight:500; margin-bottom:10px; display:flex; align-items:center; gap:7px; color:var(--c-primary); }
+  .p-card .h .msym { font-size:17px; }
+  .p-row { display:flex; justify-content:space-between; align-items:center; padding:8px 0; font-size:13px; border-top:0.5px solid var(--c-border); }
+  .p-row:first-of-type { border-top:none; padding-top:0; }
+  .p-row .l { color:var(--c-text2); }
+  .p-row .r { color:var(--c-text); }
+  .p-textarea { width:100%; border:0.5px solid var(--c-border); border-radius:8px; padding:9px 10px; font-size:13px; font-family:inherit; color:var(--c-text); background:var(--c-bg); resize:none; height:56px; outline:none; }
+  .quota-bar { height:6px; background:var(--c-bg); border-radius:3px; overflow:hidden; margin-top:8px; }
+  .quota-bar .fill { height:100%; background:var(--c-accent); }
+  .seg { display:flex; gap:6px; }
+  .seg .o { flex:1; text-align:center; padding:6px 0; font-size:12px; border-radius:7px; border:0.5px solid var(--c-border); color:var(--c-text2); cursor:pointer; }
+  .seg .o.active { background:var(--c-primary); color:#fff; border-color:var(--c-primary); }
+  .switch { width:38px; height:22px; border-radius:11px; background:var(--c-border); position:relative; cursor:pointer; flex-shrink:0; }
+  .switch.on { background:var(--c-accent); }
+  .switch .knob { width:18px; height:18px; border-radius:50%; background:#fff; position:absolute; top:2px; left:2px; transition:left .15s ease; box-shadow:0 1px 2px rgba(0,0,0,0.2); }
+  .switch.on .knob { left:18px; }
+
+  /* toast */
+  .toast {
+    position:absolute; left:50%; bottom:100px; transform: translateX(-50%) translateY(10px); background:#20323f; color:#fff;
+    font-size:12.5px; padding:9px 16px; border-radius:20px; opacity:0; pointer-events:none; transition: all .25s ease; z-index:80;
+    white-space:nowrap; max-width:85%; overflow:hidden; text-overflow:ellipsis;
+  }
+  .toast.show { opacity:1; transform: translateX(-50%) translateY(0); }
+
+  .hint { text-align:center; font-size:12px; color:#7a8a94; margin-top:14px; }
+</style>
+</head>
+<body>
+
+<div id="app-root" data-theme="light">
+<div class="device">
+
+  <div class="statusbar">
+    <span>9:41</span>
+    <span class="icons">
+      <span class="msym">signal_cellular_alt</span>
+      <span class="msym">wifi</span>
+      <span class="msym">battery_full</span>
+    </span>
+  </div>
+
+  <div class="screens" id="screens">
+
+    <!-- ============ TAB 1: 文献 ============ -->
+    <div class="screen" id="screen-lit" data-tab="lit">
+      <div class="topbar">
+        <div class="topbar-row">
+          <div>
+            <div class="page-title">文献库</div>
+            <div class="page-sub" id="lit-count">共 0 篇</div>
+          </div>
+          <div class="topbar-actions">
+            <div class="icon-btn" id="btn-batch" title="批量选择"><span class="msym">checklist</span></div>
+            <div class="icon-btn" id="btn-search-toggle"><span class="msym">search</span></div>
+            <div class="icon-btn accent" id="btn-add"><span class="msym">add</span></div>
+          </div>
+        </div>
+        <div class="search-bar" id="search-bar">
+          <span class="msym">search</span>
+          <input type="text" id="search-input" placeholder="搜索标题、作者、期刊、DOI、标签…">
+          <span class="msym" id="search-clear" style="display:none;">close</span>
+        </div>
+      </div>
+      <div class="chip-row" id="filter-chips"></div>
+      <div class="screen-scroll">
+        <div class="lit-list" id="lit-list"></div>
+      </div>
+      <div class="batch-bar" id="batch-bar">
+        <div class="left"><span id="batch-count">0</span> 项已选</div>
+        <div class="acts">
+          <span class="msym" id="batch-fav" title="收藏">star</span>
+          <span class="msym" id="batch-archive" title="归档">archive</span>
+          <span class="msym" id="batch-delete" title="删除">delete</span>
+          <span class="msym" id="batch-cancel" title="取消">close</span>
+        </div>
+      </div>
+      <div class="bottomnav" id="bottomnav-lit"></div>
+    </div>
+
+    <!-- ============ TAB 2: 速览 ============ -->
+    <div class="screen hidden" id="screen-skim" data-tab="skim">
+      <div class="topbar">
+        <div class="page-title">今日速览</div>
+        <div class="page-sub" id="skim-sub">新导入 0 · 待读 0 · 最近对话 0</div>
+      </div>
+      <div class="screen-scroll">
+        <div class="skim-list" id="skim-list"></div>
+      </div>
+      <div class="bottomnav" id="bottomnav-skim"></div>
+    </div>
+
+    <!-- ============ TAB 3: AI 研究 (hub) ============ -->
+    <div class="screen hidden" id="screen-ai" data-tab="ai">
+      <div class="topbar">
+        <div class="page-title">AI 研究</div>
+        <div class="page-sub">围绕文献进行深入问答</div>
+      </div>
+      <div class="screen-scroll">
+        <div class="ai-hub">
+          <div class="thread-card">
+            <div class="k">当前研究主线</div>
+            <div class="v" id="thread-text">图神经网络在小样本分子性质预测中的迁移策略，兼顾临床决策与检索增强生成的相关方法。</div>
+          </div>
+
+          <div class="entry-grid">
+            <div class="entry-card" id="entry-single">
+              <div class="ic"><span class="msym">description</span></div>
+              <div>
+                <div class="tt">选择一篇论文问答</div>
+                <div class="ss">围绕单篇文献深入提问</div>
+              </div>
+              <span class="msym arrow">chevron_right</span>
+            </div>
+            <div class="entry-card" id="entry-compare">
+              <div class="ic"><span class="msym">stacks</span></div>
+              <div>
+                <div class="tt">比较多篇论文</div>
+                <div class="ss">最多同时选择 5 篇</div>
+              </div>
+              <span class="msym arrow">chevron_right</span>
+            </div>
+            <div class="entry-card" id="entry-free">
+              <div class="ic"><span class="msym">chat_bubble</span></div>
+              <div>
+                <div class="tt">自由研究对话</div>
+                <div class="ss">不限定文献范围的开放讨论</div>
+              </div>
+              <span class="msym arrow">chevron_right</span>
+            </div>
+          </div>
+
+          <div class="section-lbl">最近会话</div>
+          <div id="session-list"></div>
+        </div>
+      </div>
+      <div class="bottomnav" id="bottomnav-ai"></div>
+    </div>
+
+    <!-- ============ TAB 4: 我的 ============ -->
+    <div class="screen hidden" id="screen-profile" data-tab="profile">
+      <div class="topbar">
+        <div class="page-title">我的</div>
+      </div>
+      <div class="screen-scroll">
+        <div class="profile-scroll" id="profile-scroll"></div>
+      </div>
+      <div class="bottomnav" id="bottomnav-profile"></div>
+    </div>
+
+    <!-- ============ PUSHED: 论文详情 ============ -->
+    <div class="screen hidden pushed" id="screen-detail">
+      <div class="detail-header">
+        <div class="back-btn" id="detail-back"><span class="msym">arrow_back</span></div>
+        <div class="center"></div>
+        <div class="topbar-actions">
+          <span class="msym icon-mini" id="detail-fav" style="font-size:20px;">star</span>
+          <span class="msym icon-mini more" id="detail-more" style="font-size:20px;">more_vert</span>
+        </div>
+      </div>
+      <div class="screen-scroll" style="flex:0;">
+        <div class="detail-meta" id="detail-meta"></div>
+      </div>
+      <div class="tabbar" id="detail-tabbar">
+        <div class="tab active" data-pane="summary">摘要</div>
+        <div class="tab" data-pane="chat">对话</div>
+        <div class="tab" data-pane="notes">笔记</div>
+        <div class="tab" data-pane="pdf">PDF</div>
+      </div>
+      <div class="detail-panes">
+        <div class="detail-pane active" id="pane-summary"></div>
+        <div class="detail-pane" id="pane-chat">
+          <div style="display:flex; flex-direction:column; height:100%;">
+            <div class="chat-scroll" id="dpane-chat-scroll" style="padding:14px 0;"></div>
+            <div class="quickrow" id="dpane-quick"></div>
+            <div class="chat-input-bar" style="padding:8px 0 4px; border-top:none;">
+              <input type="text" id="dpane-input" placeholder="向这篇论文提问…">
+              <span class="msym mic" id="dpane-mic">mic</span>
+              <div class="send-btn" id="dpane-send"><span class="msym">arrow_upward</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="detail-pane" id="pane-notes"></div>
+        <div class="detail-pane" id="pane-pdf"></div>
+      </div>
+    </div>
+
+    <!-- ============ PUSHED: AI 对话（多文献 / 自由）============ -->
+    <div class="screen hidden pushed" id="screen-chat">
+      <div class="detail-header">
+        <div class="back-btn" id="chat-back"><span class="msym">arrow_back</span></div>
+        <div class="center">
+          <div class="t" id="chat-title">对话</div>
+          <div class="s" id="chat-subtitle"></div>
+        </div>
+        <div class="topbar-actions">
+          <span class="msym icon-mini" id="chat-model" style="font-size:20px;">tune</span>
+        </div>
+      </div>
+      <div class="chat-context" id="chat-context"></div>
+      <div class="chat-scroll" id="chat-scroll"></div>
+      <div class="quickrow" id="chat-quick"></div>
+      <div class="chat-input-bar">
+        <input type="text" id="chat-input" placeholder="输入你的研究问题…">
+        <span class="msym mic" id="chat-mic">mic</span>
+        <div class="send-btn" id="chat-send"><span class="msym">arrow_upward</span></div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- overlay + import sheet -->
+  <div class="overlay" id="overlay"></div>
+  <div class="sheet" id="import-sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title">添加文献</div>
+    <div class="import-tabs">
+      <div class="import-tab active" data-pane="upload">上传 PDF</div>
+      <div class="import-tab" data-pane="doi">DOI / 链接</div>
+      <div class="import-tab" data-pane="share">从分享导入</div>
+    </div>
+    <div class="import-pane active" data-pane="upload">
+      <div class="dropzone" id="dropzone">
+        <div class="msym">upload_file</div>
+        <div style="font-size:13px;">点按选择本地 PDF 文件</div>
+        <div style="font-size:11px; color:var(--c-text3); margin-top:4px;">支持 PDF，最大 50MB</div>
+      </div>
+    </div>
+    <div class="import-pane" data-pane="doi">
+      <div class="field"><label>DOI 或论文链接</label><input type="text" id="doi-input" placeholder="10.1038/s41586-024-xxxxx 或 https://…"></div>
+      <div class="btn primary" id="doi-confirm" style="width:100%; justify-content:center;">解析并添加</div>
+    </div>
+    <div class="import-pane" data-pane="share">
+      <div style="font-size:13px; color:var(--c-text2); line-height:1.7;">在系统分享菜单中选择「识谛」即可将论文链接或 PDF 发送到本应用，本原型中点击下方按钮模拟该过程。</div>
+      <div class="btn primary" id="share-confirm" style="width:100%; justify-content:center; margin-top:14px;">模拟分享导入</div>
+    </div>
+
+    <div id="import-progress" style="display:none;">
+      <div class="progress-list" id="progress-list"></div>
+    </div>
+
+    <div id="import-confirm" style="display:none;">
+      <div class="field"><label>标题</label><input type="text" id="cf-title"></div>
+      <div class="field"><label>作者</label><input type="text" id="cf-authors"></div>
+      <div class="field"><label>年份</label><input type="text" id="cf-year"></div>
+      <div class="field"><label>所属文件夹</label><select id="cf-folder"><option>默认文件夹</option><option>分子生成</option><option>临床 AI</option><option>方法论</option></select></div>
+      <div class="btn primary" id="cf-confirm" style="width:100%; justify-content:center;">确认添加</div>
+    </div>
+  </div>
+
+  <!-- generic picker modal (paper picker for AI hub) -->
+  <div class="overlay" id="picker-overlay"></div>
+  <div class="sheet" id="picker-sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title" id="picker-title">选择论文</div>
+    <div class="picker-list" id="picker-list"></div>
+    <div class="btn primary" id="picker-confirm" style="width:100%; justify-content:center;">开始对话</div>
+  </div>
+
+  <!-- dropdown menu (shared) -->
+  <div class="dropdown" id="dropdown"></div>
+
+  <!-- toast -->
+  <div class="toast" id="toast"></div>
+
+</div><!-- /device -->
+
+<div class="hint">虚拟数据演示 · 支持搜索 / 筛选 / 收藏 / 归档 / 批量操作 / 论文问答 / 引用跳转 / 主题切换</div>
+</div>
+
+<script>
+/* =========================================================================
+   DATA
+========================================================================= */
+const uid = (() => { let n = 1000; return () => 'p' + (n++); })();
+
+let PAPERS = [
+  {
+    id:'p1', title:'基于图神经网络的分子性质预测方法综述', authors:'Zhang, Liu 等', year:2024, journal:'Nature Machine Intelligence',
+    doi:'10.1038/s42256-024-00812-x', tags:['图神经网络','分子生成'], status:'reading', progress:60, favorite:true, archived:false,
+    imported:'3 天前',
+    summary:{
+      oneLine:'该综述系统梳理了图神经网络在分子性质预测中的架构演进，并指出数据稀缺场景下的迁移策略是关键瓶颈。',
+      question:'如何在小样本条件下提升分子性质预测精度',
+      method:'对比学习结合图注意力机制，构建统一的架构分类框架',
+      findings:'迁移学习策略在多个基准数据集上显著优于从头训练',
+      limitation:'缺乏跨数据集的统一评测标准，部分结论依赖单一基准',
+      followups:['这些方法在真实药物筛选中效果如何','对比学习部分的实验是否可复现','还有哪些开源实现可以参考']
+    },
+    citePage:12,
+    notes:[{type:'user', content:'第 3 节的分类框架很清晰，可以用在我们组会汇报里。', time:'昨天 21:14'}],
+    chat:[]
+  },
+  {
+    id:'p2', title:'大语言模型在临床决策支持中的应用与局限', authors:'Chen, Wang 等', year:2025, journal:'NEJM AI',
+    doi:'10.1056/aix2400391', tags:['LLM','临床'], status:'unread', progress:0, favorite:false, archived:false,
+    imported:'今天',
+    summary:{
+      oneLine:'论文评估了大语言模型在多个临床场景下的决策辅助表现，强调高风险建议仍需人工复核。',
+      question:'大语言模型能否安全地辅助临床诊疗决策',
+      method:'在三家医院的真实病例上开展前瞻性对照评估',
+      findings:'模型在常见病诊断建议上与资深医生一致性较高',
+      limitation:'在罕见病和多合并症场景下，模型建议的可靠性明显下降',
+      followups:['论文如何定义“高风险建议”','对照实验的样本量是否充分','是否公开了评估用的病例数据集']
+    },
+    citePage:7,
+    notes:[],
+    chat:[]
+  },
+  {
+    id:'p3', title:'扩散模型采样加速技术进展', authors:'Li, Zhao 等', year:2024, journal:'ICML',
+    doi:'10.48550/arXiv.2403.09912', tags:['扩散模型','采样加速'], status:'unread', progress:0, favorite:false, archived:false,
+    imported:'5 天前',
+    summary:{
+      oneLine:'系统对比了近年扩散模型采样加速方法，指出蒸馏类方法在质量与速度间取得较好平衡。',
+      question:'如何在保持生成质量的前提下减少扩散模型采样步数',
+      method:'对一致性蒸馏、ODE 求解器改进等六类方法进行统一基准测试',
+      findings:'一致性蒸馏方法可将采样步数降低一个数量级且质量损失较小',
+      limitation:'基准测试主要基于图像生成任务，其他模态的结论有待验证',
+      followups:['该方法能否迁移到视频生成任务','蒸馏训练的额外成本有多大','是否有官方实现可以复现']
+    },
+    citePage:5,
+    notes:[],
+    chat:[]
+  },
+  {
+    id:'p4', title:'长上下文 Transformer 的记忆机制研究', authors:'Sun, Feng 等', year:2025, journal:'ACL',
+    doi:'10.18653/v1/2025.acl-long.221', tags:['长上下文','Transformer'], status:'later', progress:0, favorite:false, archived:false,
+    imported:'1 周前',
+    summary:{
+      oneLine:'提出了一种分层记忆压缩机制，使模型在百万级 token 上下文中仍保持稳定的检索准确率。',
+      question:'如何在超长上下文中避免关键信息被稀释',
+      method:'引入分层记忆压缩与显式检索门控机制',
+      findings:'在长文档问答任务中检索准确率提升约 18 个百分点',
+      limitation:'压缩机制引入了额外的推理延迟，尚未在生产环境验证',
+      followups:['该机制的推理开销具体有多大','是否兼容现有的 KV 缓存优化','有没有开源权重可用']
+    },
+    citePage:9,
+    notes:[],
+    chat:[]
+  },
+  {
+    id:'p5', title:'多模态检索增强生成方法综述', authors:'Guo, Xu 等', year:2024, journal:'ACM Computing Surveys',
+    doi:'10.1145/3653712', tags:['检索增强','多模态'], status:'reading', progress:25, favorite:true, archived:false,
+    imported:'2 周前',
+    summary:{
+      oneLine:'综述了图文、图表等多模态场景下的检索增强生成框架，并总结了跨模态对齐的常见挑战。',
+      question:'如何在多模态场景中构建有效的检索增强流程',
+      method:'对 30 余篇代表性工作按检索粒度和融合方式分类整理',
+      findings:'早期融合策略在图表问答任务中表现更稳定',
+      limitation:'缺乏统一的多模态检索基准，跨论文结果难以直接比较',
+      followups:['哪些基准数据集适合复现实验','早期融合与晚期融合的具体差异是什么','该综述是否讨论了成本问题']
+    },
+    citePage:3,
+    notes:[],
+    chat:[]
+  },
+  {
+    id:'p6', title:'联邦学习中的隐私保护机制研究', authors:'Ma, Tang 等', year:2023, journal:'IEEE TIFS',
+    doi:'10.1109/TIFS.2023.3298877', tags:['联邦学习','隐私保护'], status:'read', progress:100, favorite:false, archived:true,
+    imported:'1 个月前',
+    summary:{
+      oneLine:'比较了差分隐私与安全多方计算在联邦学习中的适用场景，给出了实践中的权衡建议。',
+      question:'不同隐私保护机制在联邦学习中的开销与效果如何权衡',
+      method:'在图像分类与推荐系统两个场景下进行对照实验',
+      findings:'差分隐私在通信开销上更具优势，但会带来更明显的精度损失',
+      limitation:'实验规模较小，未在超大规模联邦场景下验证结论',
+      followups:['精度损失是否可以通过其他方式弥补','安全多方计算的部署难度有多大','论文的实验代码是否开源']
+    },
+    citePage:15,
+    notes:[{type:'ai', content:'已保存：差分隐私方法在通信开销上更具优势，但精度损失更明显。', time:'3 周前'}],
+    chat:[]
+  },
+  {
+    id:'p7', title:'强化学习在机械臂精细操作中的应用', authors:'Park, Kim 等', year:2025, journal:'RSS',
+    doi:'10.15607/RSS.2025.XXI.045', tags:['强化学习','机器人'], status:'unread', progress:0, favorite:false, archived:false,
+    imported:'昨天',
+    summary:{
+      oneLine:'提出了一种结合仿真到现实迁移的强化学习框架，显著减少了机械臂精细操作任务所需的真实样本量。',
+      question:'如何降低机械臂精细操作任务中强化学习所需的真实交互样本',
+      method:'在仿真环境中预训练后，通过域随机化迁移到真实机械臂',
+      findings:'相比纯真实环境训练，所需样本量减少约 70%',
+      limitation:'任务集中在抓取与插拔类操作，未覆盖更复杂的装配任务',
+      followups:['域随机化的具体参数范围是多少','该方法对硬件精度的要求如何','是否有视频演示可以参考']
+    },
+    citePage:6,
+    notes:[],
+    chat:[]
+  }
+];
+
+let SESSIONS = [
+  {id:'s1', title:'基于图神经网络的分子性质预测方法综述 · 结论可靠吗', kind:'single', paperIds:['p1'], time:'2 小时前',
+   messages:[
+     {role:'user', text:'这篇文章的结论可靠吗？主要依据是什么'},
+     {role:'ai', text:'结论总体可靠，但依赖的基准数据集较为单一。核心依据集中在实验部分的对比结果，迁移策略相较从头训练有明显提升。', cite:12, paperId:'p1'}
+   ]}
+];
+
+const FILTERS = [
+  {key:'all', label:'全部'}, {key:'unread', label:'待读'}, {key:'reading', label:'进行中'},
+  {key:'favorite', label:'收藏'}, {key:'archived', label:'已归档'}
+];
+const STATUS_LABEL = { unread:'待读', reading:'阅读中', later:'待读', read:'已读' };
+
+/* =========================================================================
+   STATE
+========================================================================= */
+const state = {
+  tab: 'lit',
+  litFilter: 'all',
+  litSearch: '',
+  batchMode: false,
+  batchSelected: new Set(),
+  activeDetailPaperId: null,
+  detailPane: 'summary',
+  activeChatSession: null, // session object for pushed chat screen
+  theme: 'light',
+  fontSize: 'medium',
+  notifOn: true,
+  threadNote: '图神经网络在小样本分子性质预测中的迁移策略，兼顾临床决策与检索增强生成的相关方法。'
+};
+
+/* =========================================================================
+   HELPERS
+========================================================================= */
+function $(sel, root=document){ return root.querySelector(sel); }
+function $all(sel, root=document){ return Array.from(root.querySelectorAll(sel)); }
+function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function getPaper(id){ return PAPERS.find(p => p.id === id); }
+
+let toastTimer = null;
+function toast(msg){
+  const t = $('#toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 1900);
+}
+
+const NAV_ITEMS = [
+  {tab:'lit', icon:'library_books', label:'文献'},
+  {tab:'skim', icon:'bolt', label:'速览'},
+  {tab:'ai', icon:'forum', label:'AI 研究'},
+  {tab:'profile', icon:'person', label:'我的'}
+];
+function renderBottomNav(){
+  ['lit','skim','ai','profile'].forEach(tab => {
+    const el = $('#bottomnav-' + tab);
+    el.innerHTML = NAV_ITEMS.map(it => `
+      <div class="nav-item ${it.tab===state.tab?'active':''}" data-nav="${it.tab}">
+        <span class="msym">${it.icon}</span>
+        <span class="lbl">${it.label}</span>
+      </div>`).join('');
+  });
+  $all('.nav-item').forEach(el => el.addEventListener('click', () => switchTab(el.dataset.nav)));
+}
+
+function switchTab(tab){
+  state.tab = tab;
+  $all('.screen[data-tab]').forEach(s => s.classList.toggle('hidden', s.dataset.tab !== tab));
+  renderBottomNav();
+  if (tab === 'lit') renderLitList();
+  if (tab === 'skim') renderSkim();
+  if (tab === 'ai') renderAiHub();
+  if (tab === 'profile') renderProfile();
+}
+
+/* =========================================================================
+   LITERATURE TAB
+========================================================================= */
+function renderFilterChips(){
+  const row = $('#filter-chips');
+  row.innerHTML = FILTERS.map(f => `<div class="chip ${state.litFilter===f.key?'active':''}" data-filter="${f.key}">${f.label}</div>`).join('');
+  $all('.chip', row).forEach(c => c.addEventListener('click', () => { state.litFilter = c.dataset.filter; renderLitList(); }));
+}
+
+function filteredPapers(){
+  let list = PAPERS.slice();
+  if (state.litFilter === 'unread') list = list.filter(p => (p.status==='unread'||p.status==='later') && !p.archived);
+  else if (state.litFilter === 'reading') list = list.filter(p => p.status==='reading' && !p.archived);
+  else if (state.litFilter === 'favorite') list = list.filter(p => p.favorite && !p.archived);
+  else if (state.litFilter === 'archived') list = list.filter(p => p.archived);
+  else list = list.filter(p => !p.archived);
+
+  const q = state.litSearch.trim().toLowerCase();
+  if (q) {
+    list = list.filter(p => [p.title,p.authors,p.journal,p.doi,...p.tags].join(' ').toLowerCase().includes(q));
+  }
+  return list;
+}
+
+function renderLitList(){
+  renderFilterChips();
+  const list = filteredPapers();
+  $('#lit-count').textContent = `共 ${PAPERS.filter(p=>!p.archived).length} 篇`;
+  const container = $('#lit-list');
+
+  if (PAPERS.length === 0) {
+    container.innerHTML = emptyStateHtml();
+    bindEmptyState();
+    return;
+  }
+  if (list.length === 0) {
+    container.innerHTML = `<div class="empty-state"><div class="msym">search_off</div><div class="t">没有找到匹配的文献</div><div class="s">试试更换搜索词或筛选条件</div></div>`;
+    return;
+  }
+
+  container.innerHTML = list.map(p => `
+    <div class="lit-item" data-id="${p.id}">
+      <div class="lit-item-inner">
+        ${state.batchMode ? `<div class="checkbox-mini ${state.batchSelected.has(p.id)?'checked':''}" data-check="${p.id}"><span class="msym">${state.batchSelected.has(p.id)?'check':''}</span></div>` : ''}
+        <div class="lit-item-body">
+          <div class="row1">
+            <div class="title">${escapeHtml(p.title)}</div>
+            ${state.batchMode ? '' : `
+              <span class="msym icon-mini ${p.favorite?'fav-on':''}" data-fav="${p.id}">${p.favorite?'star':'star_outline'}</span>
+              <span class="msym icon-mini more" data-menu="${p.id}">more_vert</span>
+            `}
+          </div>
+          <div class="meta">${p.authors} · ${p.year} · ${p.journal}</div>
+          <div class="row3">
+            ${p.tags.map(t=>`<span class="tag">${t}</span>`).join('')}
+            <span class="status-label">${p.status==='reading' ? `阅读 ${p.progress}%` : (STATUS_LABEL[p.status]||'')}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  `).join('');
+
+  $all('.lit-item', container).forEach(el => {
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-fav]') || e.target.closest('[data-menu]') || e.target.closest('[data-check]')) return;
+      const id = el.dataset.id;
+      if (state.batchMode) { toggleBatchSelect(id); return; }
+      openDetail(id);
+    });
+  });
+  $all('[data-fav]', container).forEach(el => el.addEventListener('click', (e) => { e.stopPropagation(); toggleFavorite(el.dataset.fav); }));
+  $all('[data-menu]', container).forEach(el => el.addEventListener('click', (e) => { e.stopPropagation(); openLitMenu(el, el.dataset.menu); }));
+  $all('[data-check]', container).forEach(el => el.addEventListener('click', (e) => { e.stopPropagation(); toggleBatchSelect(el.dataset.check); }));
+}
+
+function emptyStateHtml(){
+  return `
+    <div class="empty-state">
+      <div class="msym">library_add</div>
+      <div class="t">还没有文献</div>
+      <div class="s">上传 PDF 或输入 DOI 链接，开始你的第一篇文献</div>
+      <div class="empty-actions">
+        <div class="btn primary" id="empty-upload"><span class="msym" style="font-size:16px;">upload_file</span>上传 PDF</div>
+        <div class="btn" id="empty-doi"><span class="msym" style="font-size:16px;">link</span>输入 DOI/链接</div>
+      </div>
+    </div>`;
+}
+function bindEmptyState(){
+  const u = $('#empty-upload'), d = $('#empty-doi');
+  if (u) u.addEventListener('click', () => openImportSheet('upload'));
+  if (d) d.addEventListener('click', () => openImportSheet('doi'));
+}
+
+function toggleFavorite(id){
+  const p = getPaper(id); p.favorite = !p.favorite;
+  toast(p.favorite ? '已加入收藏' : '已取消收藏');
+  renderLitList();
+  if (state.activeDetailPaperId === id) $('#detail-fav').textContent = p.favorite ? 'star' : 'star_outline';
+  if (state.activeDetailPaperId === id) $('#detail-fav').classList.toggle('fav-on', p.favorite);
+}
+
+function openLitMenu(anchorEl, id){
+  const p = getPaper(id);
+  const dd = $('#dropdown');
+  const rect = anchorEl.getBoundingClientRect();
+  dd.style.top = (rect.bottom + 4) + 'px';
+  dd.style.left = Math.max(8, rect.right - 160) + 'px';
+  dd.innerHTML = `
+    <div class="item" data-act="unread"><span class="msym">visibility</span>标记为待读</div>
+    <div class="item" data-act="reading"><span class="msym">auto_stories</span>标记为进行中</div>
+    <div class="item" data-act="read"><span class="msym">task_alt</span>标记为已读</div>
+    <div class="item" data-act="archive"><span class="msym">archive</span>${p.archived ? '取消归档' : '归档'}</div>
+    <div class="item danger" data-act="delete"><span class="msym">delete</span>删除</div>
+  `;
+  dd.classList.add('show');
+  $all('.item', dd).forEach(it => it.onclick = () => {
+    const act = it.dataset.act;
+    if (act === 'delete') {
+      PAPERS = PAPERS.filter(x => x.id !== id);
+      toast('已删除该文献');
+    } else if (act === 'archive') {
+      p.archived = !p.archived;
+      toast(p.archived ? '已归档' : '已取消归档');
+    } else {
+      p.status = act; if (act !== 'reading') p.progress = act==='read' ? 100 : 0;
+      toast('已标记为 ' + (STATUS_LABEL[act] || act));
+    }
+    dd.classList.remove('show');
+    renderLitList();
+  });
+}
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('#dropdown') && !e.target.closest('[data-menu]')) $('#dropdown').classList.remove('show');
+});
+
+/* batch mode */
+function toggleBatchSelect(id){
+  if (state.batchSelected.has(id)) state.batchSelected.delete(id); else state.batchSelected.add(id);
+  $('#batch-count').textContent = state.batchSelected.size;
+  $('#batch-bar').classList.toggle('show', state.batchSelected.size > 0);
+  renderLitList();
+}
+$('#btn-batch').addEventListener('click', () => {
+  state.batchMode = !state.batchMode;
+  state.batchSelected.clear();
+  $('#batch-bar').classList.remove('show');
+  $('#btn-batch').style.background = state.batchMode ? 'var(--c-accent)' : '';
+  $('#btn-batch').style.color = state.batchMode ? '#fff' : '';
+  renderLitList();
+});
+$('#batch-cancel').addEventListener('click', () => { state.batchMode=false; state.batchSelected.clear(); $('#batch-bar').classList.remove('show'); $('#btn-batch').style.background=''; $('#btn-batch').style.color=''; renderLitList(); });
+$('#batch-fav').addEventListener('click', () => { state.batchSelected.forEach(id => getPaper(id).favorite = true); toast('已批量收藏'); exitBatch(); });
+$('#batch-archive').addEventListener('click', () => { state.batchSelected.forEach(id => getPaper(id).archived = true); toast('已批量归档'); exitBatch(); });
+$('#batch-delete').addEventListener('click', () => { PAPERS = PAPERS.filter(p => !state.batchSelected.has(p.id)); toast('已批量删除'); exitBatch(); });
+function exitBatch(){ state.batchMode=false; state.batchSelected.clear(); $('#batch-bar').classList.remove('show'); $('#btn-batch').style.background=''; $('#btn-batch').style.color=''; renderLitList(); }
+
+/* search */
+$('#btn-search-toggle').addEventListener('click', () => {
+  const bar = $('#search-bar');
+  bar.classList.toggle('open');
+  if (bar.classList.contains('open')) $('#search-input').focus();
+  else { state.litSearch=''; $('#search-input').value=''; renderLitList(); }
+});
+$('#search-input').addEventListener('input', (e) => {
+  state.litSearch = e.target.value;
+  $('#search-clear').style.display = e.target.value ? 'block' : 'none';
+  renderLitList();
+});
+$('#search-clear').addEventListener('click', () => { state.litSearch=''; $('#search-input').value=''; $('#search-clear').style.display='none'; renderLitList(); });
+
+/* =========================================================================
+   IMPORT SHEET
+========================================================================= */
+function openImportSheet(defaultPane){
+  $('#overlay').classList.add('show');
+  $('#import-sheet').classList.add('show');
+  $all('.import-tab').forEach(t => t.classList.toggle('active', t.dataset.pane === (defaultPane||'upload')));
+  $all('.import-pane').forEach(p => p.classList.toggle('active', p.dataset.pane === (defaultPane||'upload')));
+  $('#import-progress').style.display = 'none';
+  $('#import-confirm').style.display = 'none';
+  $all('.import-tabs')[0].style.display = 'flex';
+}
+function closeImportSheet(){ $('#overlay').classList.remove('show'); $('#import-sheet').classList.remove('show'); }
+$('#btn-add').addEventListener('click', () => openImportSheet('upload'));
+$('#overlay').addEventListener('click', closeImportSheet);
+$all('.import-tab').forEach(t => t.addEventListener('click', () => {
+  $all('.import-tab').forEach(x=>x.classList.remove('active')); t.classList.add('active');
+  $all('.import-pane').forEach(p=>p.classList.toggle('active', p.dataset.pane===t.dataset.pane));
+}));
+
+function runImportProgress(meta){
+  $all('.import-pane').forEach(p=>p.classList.remove('active'));
+  $all('.import-tabs')[0].style.display='none';
+  $('#import-progress').style.display = 'block';
+  const steps = [
+    {key:'upload', label:'上传文件'},
+    {key:'parse', label:'解析元数据'},
+    {key:'summary', label:'生成摘要'}
+  ];
+  const list = $('#progress-list');
+  list.innerHTML = steps.map((s,i) => `<div class="progress-step" id="step-${s.key}"><div class="dot"><span class="msym"></span></div><span>${s.label}</span></div>`).join('');
+  let i = 0;
+  function next(){
+    if (i > 0) { const prev = $('#step-'+steps[i-1].key); prev.classList.remove('active'); prev.classList.add('done'); prev.querySelector('.msym').textContent='check'; }
+    if (i >= steps.length) { setTimeout(()=>showImportConfirm(meta), 350); return; }
+    const cur = $('#step-'+steps[i].key); cur.classList.add('active'); cur.querySelector('.dot').innerHTML = '<div class="spinner"></div>';
+    i++;
+    setTimeout(next, 850);
+  }
+  next();
+}
+function showImportConfirm(meta){
+  $('#import-progress').style.display='none';
+  $('#import-confirm').style.display='block';
+  $('#cf-title').value = meta.title;
+  $('#cf-authors').value = meta.authors;
+  $('#cf-year').value = meta.year;
+}
+$('#dropzone').addEventListener('click', () => {
+  runImportProgress({title:'注意力机制可解释性研究新进展', authors:'Wu, Han 等', year:2025});
+});
+$('#doi-confirm').addEventListener('click', () => {
+  const v = $('#doi-input').value.trim();
+  if (!v) { toast('请输入 DOI 或链接'); return; }
+  runImportProgress({title:'基于扩散模型的分子构象生成方法', authors:'Xie, Zhou 等', year:2025});
+});
+$('#share-confirm').addEventListener('click', () => {
+  runImportProgress({title:'知识图谱增强的科学问答系统', authors:'Fan, Qian 等', year:2024});
+});
+$('#cf-confirm').addEventListener('click', () => {
+  const p = {
+    id: uid(), title: $('#cf-title').value || '未命名文献', authors: $('#cf-authors').value || '未知作者',
+    year: parseInt($('#cf-year').value)||2025, journal:'待补充期刊', doi:'待解析', tags:['新导入'],
+    status:'unread', progress:0, favorite:false, archived:false, imported:'刚刚',
+    summary:{ oneLine:'摘要生成中，稍后可在速览页查看完整结构化摘要。', question:'—', method:'—', findings:'—', limitation:'—', followups:[] },
+    citePage:1, notes:[], chat:[]
+  };
+  PAPERS.unshift(p);
+  closeImportSheet();
+  toast('文献已添加');
+  renderLitList();
+  if (state.tab==='skim') renderSkim();
+});
+
+/* =========================================================================
+   SKIM TAB
+========================================================================= */
+let skimViewMode = {}; // id -> 'short'|'full'
+function renderSkim(){
+  const visible = PAPERS.filter(p => !p.archived);
+  const unread = visible.filter(p=>p.status==='unread'||p.status==='later').length;
+  const newly = visible.filter(p=>p.imported==='刚刚'||p.imported==='今天'||p.imported==='昨天').length;
+  $('#skim-sub').textContent = `新导入 ${newly} · 待读 ${unread} · 最近对话 ${SESSIONS.length}`;
+
+  const ordered = visible.slice().sort((a,b) => (a.status==='read'?1:0) - (b.status==='read'?1:0));
+  $('#skim-list').innerHTML = ordered.map(p => {
+    const mode = skimViewMode[p.id] || 'short';
+    const isRead = p.status === 'read';
+    return `
+    <div class="skim-card ${isRead?'dim':''}" data-id="${p.id}">
+      <div class="title" data-open="${p.id}">${escapeHtml(p.title)}</div>
+      <div class="meta">${p.authors} · ${p.year} · ${p.journal}</div>
+      <div class="skim-toggle">
+        <div class="opt ${mode==='short'?'active':''}" data-mode="short">30 秒速览</div>
+        <div class="opt ${mode==='full'?'active':''}" data-mode="full">完整摘要</div>
+      </div>
+      <div class="skim-oneline">${p.summary.oneLine}</div>
+      ${mode==='full' ? `
+      <div class="skim-grid">
+        <div class="cell"><div class="k">研究问题</div><div class="v">${p.summary.question}</div></div>
+        <div class="cell"><div class="k">方法</div><div class="v">${p.summary.method}</div></div>
+        <div class="cell"><div class="k">主要发现</div><div class="v">${p.summary.findings}</div></div>
+        <div class="cell"><div class="k">局限</div><div class="v">${p.summary.limitation}</div></div>
+      </div>` : ''}
+      ${p.summary.followups.length ? `
+      <div class="skim-followups">
+        <div class="lbl">值得追问</div>
+        ${p.summary.followups.slice(0,3).map(q => `<div class="followup-chip" data-ask="${p.id}" data-q="${escapeHtml(q)}">${q}<span class="msym">arrow_forward</span></div>`).join('')}
+      </div>` : ''}
+      <div class="skim-actions">
+        <span class="msym ${p.favorite?'on':''}" data-act="fav" data-id="${p.id}">${p.favorite?'star':'star_outline'}</span>
+        <span class="msym ${isRead?'read-on':''}" data-act="read" data-id="${p.id}">${isRead?'task_alt':'radio_button_unchecked'}</span>
+        <span class="msym" data-act="note" data-id="${p.id}">note_add</span>
+        <span class="msym" data-act="listen" data-id="${p.id}">volume_up</span>
+        <span class="msym" data-act="pdf" data-id="${p.id}" style="margin-left:auto;">description</span>
+      </div>
+      <div class="skim-footnote" data-open="${p.id}"><span class="msym" style="font-size:13px;">smart_toy</span>由 shidea AI 生成 · ${p.imported} · 查看依据</div>
+    </div>`;
+  }).join('');
+
+  $all('[data-mode]', $('#skim-list')).forEach(el => el.addEventListener('click', (e) => {
+    const card = el.closest('.skim-card'); const id = card.dataset.id;
+    skimViewMode[id] = el.dataset.mode; renderSkim();
+  }));
+  $all('[data-open]', $('#skim-list')).forEach(el => el.addEventListener('click', () => openDetail(el.dataset.open)));
+  $all('[data-ask]', $('#skim-list')).forEach(el => el.addEventListener('click', () => startPaperChatWithQuestion(el.dataset.ask, el.dataset.q)));
+  $all('[data-act]', $('#skim-list')).forEach(el => el.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const id = el.dataset.id, act = el.dataset.act, p = getPaper(id);
+    if (act==='fav') { p.favorite = !p.favorite; toast(p.favorite?'已收藏':'已取消收藏'); }
+    if (act==='read') { p.status = p.status==='read' ? 'unread' : 'read'; p.progress = p.status==='read'?100:0; toast(p.status==='read'?'已标记为已读':'已标记为待读'); }
+    if (act==='note') { p.notes.unshift({type:'ai', content:p.summary.oneLine, time:'刚刚'}); toast('已保存为笔记'); }
+    if (act==='listen') { toast('朗读中…'); }
+    if (act==='pdf') { openDetail(id, 'pdf'); return; }
+    renderSkim();
+  }));
+}
+
+/* =========================================================================
+   PAPER DETAIL
+========================================================================= */
+function openDetail(id, pane){
+  state.activeDetailPaperId = id;
+  state.detailPane = pane || 'summary';
+  const p = getPaper(id);
+  $('#screen-detail').classList.remove('hidden');
+  $('.detail-header .center .t', $('#screen-detail')).textContent = p.title;
+  $('.detail-header .center .s', $('#screen-detail')).textContent = p.journal;
+  $('#detail-fav').textContent = p.favorite ? 'star' : 'star_outline';
+  $('#detail-fav').classList.toggle('fav-on', p.favorite);
+
+  $('#detail-meta').innerHTML = `
+    <div class="t">${escapeHtml(p.title)}</div>
+    <div class="m">${p.authors} · ${p.year} · ${p.journal}</div>
+    <div class="doi">DOI: ${p.doi}</div>
+    <div class="tagrow">${p.tags.map(t=>`<span class="tag outline">${t}</span>`).join('')}</div>
+  `;
+
+  renderSummaryPane(p);
+  renderNotesPane(p);
+  renderPdfPane(p, p.citePage, false);
+  renderDetailChat(p);
+
+  setDetailTab(state.detailPane);
+}
+$('#detail-back').addEventListener('click', () => { $('#screen-detail').classList.add('hidden'); });
+$('#detail-fav').addEventListener('click', () => toggleFavorite(state.activeDetailPaperId));
+$('#detail-more').addEventListener('click', (e) => openLitMenu(e.target, state.activeDetailPaperId));
+
+$all('#detail-tabbar .tab').forEach(t => t.addEventListener('click', () => setDetailTab(t.dataset.pane)));
+function setDetailTab(pane){
+  state.detailPane = pane;
+  $all('#detail-tabbar .tab').forEach(t => t.classList.toggle('active', t.dataset.pane===pane));
+  $all('.detail-pane').forEach(p => p.classList.toggle('active', p.id === 'pane-'+pane));
+}
+
+function renderSummaryPane(p){
+  $('#pane-summary').innerHTML = `
+    <div class="info-card"><div class="k">研究问题</div><div class="v">${p.summary.question}</div></div>
+    <div class="info-card"><div class="k">方法</div><div class="v">${p.summary.method}</div></div>
+    <div class="info-card"><div class="k">主要发现</div><div class="v">${p.summary.findings}</div></div>
+    <div class="info-card"><div class="k">局限</div><div class="v">${p.summary.limitation}</div></div>
+    <div class="info-card"><div class="k">引用依据</div><div class="v">关键方法与结论详见 <span class="cite-link" data-cite="${p.citePage}">第 ${p.citePage} 页</span></div></div>
+  `;
+  $('[data-cite]', $('#pane-summary')).addEventListener('click', (e) => jumpToCitation(p, parseInt(e.target.dataset.cite)));
+}
+
+function jumpToCitation(p, page){
+  setDetailTab('pdf');
+  renderPdfPane(p, page, true);
+}
+
+function renderPdfPane(p, page, highlight){
+  const pane = $('#pane-pdf');
+  pane.innerHTML = `
+    <div class="pdf-toolbar">
+      <input type="text" placeholder="在 PDF 中搜索文本…" id="pdf-search">
+      <span class="msym" id="pdf-zoom-out">zoom_out</span>
+      <span class="msym" id="pdf-zoom-in">zoom_in</span>
+    </div>
+    <div class="pdf-page" id="pdf-page" style="transform: scale(1);">
+      <div class="ln"></div><div class="ln"></div><div class="ln short"></div>
+      <div class="ln" style="margin-top:16px;"></div><div class="ln"></div>
+      ${highlight ? `<div class="pdf-highlight"><div class="txt">…迁移学习策略在多个基准数据集上显著优于从头训练，尤其是在训练样本少于 200 条时优势更为明显……</div></div>` : ''}
+      <div class="ln"></div><div class="ln short"></div>
+      <div class="ln" style="margin-top:16px;"></div><div class="ln"></div><div class="ln"></div>
+    </div>
+    <div class="pdf-pagenav">
+      <span class="msym" id="pdf-prev">chevron_left</span>
+      <span id="pdf-pagenum">第 ${page} 页 / 共 24 页</span>
+      <span class="msym" id="pdf-next">chevron_right</span>
+    </div>
+  `;
+  let zoom = 1, curPage = page;
+  $('#pdf-zoom-in').addEventListener('click', () => { zoom = Math.min(1.4, zoom+0.1); $('#pdf-page').style.transform = `scale(${zoom})`; });
+  $('#pdf-zoom-out').addEventListener('click', () => { zoom = Math.max(0.7, zoom-0.1); $('#pdf-page').style.transform = `scale(${zoom})`; });
+  $('#pdf-prev').addEventListener('click', () => { curPage = Math.max(1, curPage-1); renderPdfPane(p, curPage, curPage===p.citePage); });
+  $('#pdf-next').addEventListener('click', () => { curPage = Math.min(24, curPage+1); renderPdfPane(p, curPage, curPage===p.citePage); });
+  $('#pdf-search').addEventListener('keydown', (e) => { if (e.key==='Enter') toast('未在当前 PDF 中找到匹配内容（演示数据）'); });
+}
+
+function renderNotesPane(p){
+  const pane = $('#pane-notes');
+  pane.innerHTML = `
+    <div class="note-add">
+      <textarea id="note-input" placeholder="添加笔记…"></textarea>
+      <div class="btn primary" id="note-add-btn" style="align-self:flex-end;">保存</div>
+    </div>
+    <div id="notes-list"></div>
+  `;
+  renderNotesList(p);
+  $('#note-add-btn').addEventListener('click', () => {
+    const v = $('#note-input').value.trim();
+    if (!v) { toast('请输入笔记内容'); return; }
+    p.notes.unshift({type:'user', content:v, time:'刚刚'});
+    $('#note-input').value = '';
+    renderNotesList(p);
+    toast('笔记已保存');
+  });
+}
+function renderNotesList(p){
+  const typeLabel = {user:'我的笔记', ai:'AI 回答', excerpt:'PDF 摘录'};
+  const el = $('#notes-list');
+  if (!p.notes.length) { el.innerHTML = `<div class="empty-state" style="padding:40px 10px;"><div class="msym">sticky_note_2</div><div class="s">还没有笔记，保存对话回答或写下你的想法</div></div>`; return; }
+  el.innerHTML = p.notes.map(n => `
+    <div class="note-item">
+      <div class="h"><span class="tagtype ${n.type}">${typeLabel[n.type]}</span><span class="time">${n.time}</span></div>
+      <div class="c">${escapeHtml(n.content)}</div>
+    </div>
+  `).join('');
+}
+
+/* ---- detail chat (single paper, embedded in tab) ---- */
+function renderDetailChat(p){
+  const scroll = $('#dpane-chat-scroll');
+  scroll.innerHTML = renderMessages(p.chat, p);
+  scroll.scrollTop = scroll.scrollHeight;
+  const quicks = ['解释方法','结论可靠吗','列出局限'];
+  $('#dpane-quick').innerHTML = quicks.map(q=>`<div class="quick-chip" data-q="${q}">${q}</div>`).join('');
+  $all('.quick-chip', $('#dpane-quick')).forEach(c => c.addEventListener('click', () => sendDetailMessage(c.dataset.q)));
+  bindMessageActions(scroll, p);
+}
+$('#dpane-send').addEventListener('click', () => { const v=$('#dpane-input').value.trim(); if(v){ sendDetailMessage(v); $('#dpane-input').value=''; } });
+$('#dpane-input').addEventListener('keydown', (e) => { if (e.key==='Enter') $('#dpane-send').click(); });
+$('#dpane-mic').addEventListener('click', function(){ this.classList.toggle('recording'); toast(this.classList.contains('recording')?'正在聆听…':'已停止录音'); });
+
+function sendDetailMessage(text){
+  const p = getPaper(state.activeDetailPaperId);
+  p.chat.push({role:'user', text});
+  renderDetailChat(p);
+  showTypingThen(() => {
+    const reply = generateReply(text, [p]);
+    p.chat.push(reply);
+    renderDetailChat(p);
+  }, $('#dpane-chat-scroll'));
+}
+
+/* =========================================================================
+   AI RESEARCH HUB + PUSHED CHAT
+========================================================================= */
+function renderAiHub(){
+  $('#thread-text').textContent = state.threadNote;
+  const el = $('#session-list');
+  if (!SESSIONS.length) { el.innerHTML = `<div class="empty-state" style="padding:30px 10px;"><div class="msym">history</div><div class="s">还没有会话记录</div></div>`; return; }
+  el.innerHTML = SESSIONS.slice().reverse().map(s => `
+    <div class="session-item" data-sid="${s.id}">
+      <div class="tt">${escapeHtml(s.title)}</div>
+      <div class="ss">${s.kind==='single'?'单篇问答':s.kind==='compare'?'多篇对比':'自由对话'} · ${s.time}</div>
+    </div>
+  `).join('');
+  $all('.session-item', el).forEach(it => it.addEventListener('click', () => openSession(it.dataset.sid)));
+}
+$('#entry-single').addEventListener('click', () => openPicker('single'));
+$('#entry-compare').addEventListener('click', () => openPicker('compare'));
+$('#entry-free').addEventListener('click', () => openChatScreen({id:null, kind:'free', paperIds:[], title:'自由研究对话', messages:[]}));
+
+/* picker modal */
+let pickerMode = 'single'; let pickerSelected = new Set();
+function openPicker(mode){
+  pickerMode = mode; pickerSelected = new Set();
+  $('#picker-title').textContent = mode==='single' ? '选择一篇论文' : '选择最多 5 篇论文';
+  const list = PAPERS.filter(p=>!p.archived);
+  $('#picker-list').innerHTML = list.map(p => `
+    <div class="picker-item" data-id="${p.id}">
+      ${mode==='compare' ? `<div class="checkbox-mini" data-pcheck="${p.id}"></div>` : `<span class="msym" style="font-size:18px; color:var(--c-text3);">description</span>`}
+      <div><div class="tt">${escapeHtml(p.title)}</div><div class="ss">${p.authors} · ${p.year}</div></div>
+    </div>`).join('');
+  $all('.picker-item', $('#picker-list')).forEach(it => it.addEventListener('click', () => {
+    const id = it.dataset.id;
+    if (mode === 'single') { closePicker(); startPaperChat(id); return; }
+    if (pickerSelected.has(id)) pickerSelected.delete(id);
+    else { if (pickerSelected.size>=5) { toast('最多同时选择 5 篇'); return; } pickerSelected.add(id); }
+    const box = it.querySelector('[data-pcheck]');
+    box.classList.toggle('checked', pickerSelected.has(id));
+    box.innerHTML = pickerSelected.has(id) ? '<span class="msym">check</span>' : '';
+  }));
+  $('#picker-confirm').style.display = mode==='compare' ? 'block' : 'none';
+  $('#overlay-picker-bind');
+  $('#picker-overlay').classList.add('show');
+  $('#picker-sheet').classList.add('show');
+}
+function closePicker(){ $('#picker-overlay').classList.remove('show'); $('#picker-sheet').classList.remove('show'); }
+$('#picker-overlay').addEventListener('click', closePicker);
+$('#picker-confirm').addEventListener('click', () => {
+  if (pickerSelected.size < 2) { toast('请至少选择 2 篇论文'); return; }
+  closePicker();
+  startCompareChat(Array.from(pickerSelected));
+});
+
+function startPaperChat(id){
+  const p = getPaper(id);
+  const existing = SESSIONS.find(s => s.kind==='single' && s.paperIds[0]===id && s.messages.length<2);
+  openChatScreen({id:null, kind:'single', paperIds:[id], title:p.title, messages:[]});
+}
+function startPaperChatWithQuestion(id, q){
+  const p = getPaper(id);
+  openChatScreen({id:null, kind:'single', paperIds:[id], title:p.title, messages:[]});
+  setTimeout(() => sendChatMessage(q), 200);
+}
+function startCompareChat(ids){
+  const titles = ids.map(id=>getPaper(id).title).join(' / ');
+  openChatScreen({id:null, kind:'compare', paperIds:ids, title:'多篇对比 · ' + ids.length + ' 篇', messages:[]});
+}
+function openSession(sid){
+  const s = SESSIONS.find(x=>x.id===sid);
+  openChatScreen(s);
+}
+
+let activeSession = null;
+function openChatScreen(session){
+  activeSession = session;
+  $('#screen-chat').classList.remove('hidden');
+  $('#chat-title').textContent = session.kind==='free' ? '自由研究对话' : (session.kind==='compare' ? '多篇文献对比' : getPaper(session.paperIds[0]).title);
+  $('#chat-subtitle').textContent = session.kind==='free' ? '不限定文献范围' : (session.kind==='compare' ? session.paperIds.length+' 篇文献' : '单篇问答');
+  renderChatContext();
+  renderChatMessages();
+  renderChatQuick();
+}
+$('#chat-back').addEventListener('click', () => {
+  $('#screen-chat').classList.add('hidden');
+  if (activeSession && activeSession.messages.length && !activeSession.id) {
+    activeSession.id = 's' + (SESSIONS.length+1) + '_' + Date.now();
+    activeSession.time = '刚刚';
+    activeSession.title = buildSessionTitle(activeSession);
+    SESSIONS.push(activeSession);
+  }
+  renderAiHub();
+});
+$('#chat-model').addEventListener('click', (e) => {
+  const dd = $('#dropdown');
+  const rect = e.target.getBoundingClientRect();
+  dd.style.top = (rect.bottom+4)+'px'; dd.style.left = Math.max(8, rect.right-170)+'px';
+  dd.innerHTML = `
+    <div class="item" data-model="default"><span class="msym">check</span>识谛默认模型</div>
+    <div class="item" data-model="pro"><span class="msym"></span>识谛 Pro 模型</div>
+    <div class="item" data-model="fast"><span class="msym"></span>快速模式</div>
+  `;
+  dd.classList.add('show');
+  $all('.item', dd).forEach(it => it.onclick = () => { toast('已切换为：' + it.textContent.trim()); dd.classList.remove('show'); });
+});
+
+function buildSessionTitle(s){
+  const firstQ = s.messages.find(m=>m.role==='user');
+  const base = s.kind==='free' ? '自由研究对话' : (s.kind==='compare' ? '多篇对比 · ' + s.paperIds.length + ' 篇' : getPaper(s.paperIds[0]).title);
+  return firstQ ? base + ' · ' + firstQ.text.slice(0,14) : base;
+}
+
+function renderChatContext(){
+  const s = activeSession;
+  const el = $('#chat-context');
+  if (s.kind === 'free') { el.innerHTML = `<span style="font-size:12px; color:var(--c-text3);">未关联文献，Claude 将基于常识与已保存的研究主线回答</span>`; return; }
+  el.innerHTML = s.paperIds.map(id => `<div class="ctx-chip">${escapeHtml(getPaper(id).title.slice(0,16))}${getPaper(id).title.length>16?'…':''}<span class="msym" data-rm="${id}">close</span></div>`).join('')
+    + (s.kind==='compare' && s.paperIds.length<5 ? `<div class="ctx-chip" id="ctx-add" style="cursor:pointer;"><span class="msym" style="font-size:14px;">add</span>添加</div>` : '');
+  $all('[data-rm]', el).forEach(x => x.addEventListener('click', () => {
+    s.paperIds = s.paperIds.filter(id => id !== x.dataset.rm);
+    if (s.paperIds.length === 0) { toast('已移除全部文献，切换为自由对话'); s.kind='free'; }
+    renderChatContext();
+  }));
+  const addBtn = $('#ctx-add');
+  if (addBtn) addBtn.addEventListener('click', () => {
+    const remaining = PAPERS.filter(p => !s.paperIds.includes(p.id) && !p.archived);
+    if (!remaining.length) { toast('没有更多可添加的文献'); return; }
+    s.paperIds.push(remaining[0].id);
+    toast('已添加《' + remaining[0].title.slice(0,12) + '…》');
+    renderChatContext();
+  });
+}
+
+function renderMessages(msgs, singlePaper){
+  return msgs.map(m => {
+    if (m.role === 'user') return `<div class="msg user">${escapeHtml(m.text)}</div>`;
+    if (m.unsure) return `<div class="msg unsure"><div class="h"><span class="msym">error</span>不足以从文献确认该细节</div><div class="b">${escapeHtml(m.text)}</div></div>`;
+    const citeHtml = m.cite ? ` <span class="cite-link" data-cite-msg="${m.cite}" data-cite-paper="${m.paperId||''}">第 ${m.cite} 页</span>` : '';
+    return `<div class="msg ai">${escapeHtml(m.text)}${citeHtml}
+      <div class="actions"><span class="msym" data-copy>content_copy</span><span class="msym" data-savenote data-text="${escapeHtml(m.text)}">note_add</span><span class="msym" data-continue>refresh</span></div>
+    </div>`;
+  }).join('');
+}
+function bindMessageActions(container, contextPaper){
+  $all('[data-copy]', container).forEach(el => el.addEventListener('click', () => toast('已复制到剪贴板')));
+  $all('[data-savenote]', container).forEach(el => el.addEventListener('click', () => {
+    const p = contextPaper && contextPaper.id ? contextPaper : (activeSession && activeSession.paperIds[0] ? getPaper(activeSession.paperIds[0]) : null);
+    if (!p) { toast('未关联文献，无法保存到笔记'); return; }
+    p.notes.unshift({type:'ai', content: el.dataset.text, time:'刚刚'});
+    toast('已保存为笔记');
+  }));
+  $all('[data-continue]', container).forEach(el => el.addEventListener('click', () => toast('已在原问题基础上继续追问（演示）')));
+  $all('[data-cite-msg]', container).forEach(el => el.addEventListener('click', () => {
+    const pid = el.dataset.citePaper;
+    if (!pid) { toast('该来源无法定位到具体 PDF'); return; }
+    openDetail(pid, 'pdf');
+    setTimeout(()=>renderPdfPane(getPaper(pid), parseInt(el.dataset.citeMsg), true), 50);
+  }));
+}
+function renderChatMessages(){
+  const scroll = $('#chat-scroll');
+  scroll.innerHTML = renderMessages(activeSession.messages);
+  scroll.scrollTop = scroll.scrollHeight;
+  bindMessageActions(scroll, activeSession.paperIds.length===1 ? getPaper(activeSession.paperIds[0]) : null);
+}
+function renderChatQuick(){
+  const el = $('#chat-quick');
+  if (activeSession.kind === 'single') {
+    const quicks = ['解释方法','结论可靠吗','列出局限'];
+    el.innerHTML = quicks.map(q=>`<div class="quick-chip" data-q="${q}">${q}</div>`).join('');
+    $all('.quick-chip', el).forEach(c => c.addEventListener('click', () => sendChatMessage(c.dataset.q)));
+  } else if (activeSession.kind === 'compare') {
+    el.innerHTML = `<div class="quick-chip" data-q="这几篇文献的方法有什么共同点">共同点</div><div class="quick-chip" data-q="这几篇文献的结论有哪些分歧">分歧点</div>`;
+    $all('.quick-chip', el).forEach(c => c.addEventListener('click', () => sendChatMessage(c.dataset.q)));
+  } else {
+    el.innerHTML = '';
+  }
+}
+$('#chat-send').addEventListener('click', () => { const v=$('#chat-input').value.trim(); if(v){ sendChatMessage(v); $('#chat-input').value=''; } });
+$('#chat-input').addEventListener('keydown', (e) => { if (e.key==='Enter') $('#chat-send').click(); });
+$('#chat-mic').addEventListener('click', function(){ this.classList.toggle('recording'); toast(this.classList.contains('recording')?'正在聆听…':'已停止录音'); });
+
+function sendChatMessage(text){
+  activeSession.messages.push({role:'user', text});
+  renderChatMessages();
+  const papers = activeSession.paperIds.map(getPaper);
+  showTypingThen(() => {
+    const reply = generateReply(text, papers, activeSession.kind);
+    activeSession.messages.push(reply);
+    renderChatMessages();
+  }, $('#chat-scroll'));
+}
+
+function showTypingThen(cb, scrollEl){
+  const t = document.createElement('div');
+  t.className = 'typing'; t.innerHTML = '<span></span><span></span><span></span>';
+  scrollEl.appendChild(t); scrollEl.scrollTop = scrollEl.scrollHeight;
+  setTimeout(() => { t.remove(); cb(); }, 700 + Math.random()*500);
+}
+
+/* ---- rule-based reply generator ---- */
+const UNSURE_KEYWORDS = ['超参数','源代码','代码仓库','数据集下载','作者邮箱','经费','基金','原始数据'];
+function generateReply(question, papers, kind){
+  const q = question.toLowerCase();
+  if (UNSURE_KEYWORDS.some(k => question.includes(k))) {
+    return {role:'ai', unsure:true, text:'论文摘要与已索引内容中未提供该细节，建议查阅原文对应章节或作者公开的代码仓库。'};
+  }
+  if (!papers.length) {
+    return {role:'ai', text:'当前对话未关联具体文献，我可以基于你的研究主线给出一般性建议，但涉及具体数据的问题建议先添加文献作为上下文。'};
+  }
+  if (kind === 'compare' && papers.length > 1) {
+    const bullets = papers.map(p => '《'+p.title.slice(0,14)+'…》：'+p.summary.oneLine).join(' ');
+    return {role:'ai', text:'综合来看，这几篇文献的角度并不完全一致。' + bullets};
+  }
+  const p = papers[0];
+  if (q.includes('方法')) return {role:'ai', text:'这篇文献采用的方法是：'+p.summary.method+'。', cite:p.citePage, paperId:p.id};
+  if (q.includes('局限') || q.includes('不足')) return {role:'ai', text:p.summary.limitation+'。作者也建议在应用前留意这一点。'};
+  if (q.includes('结论') || q.includes('可靠')) return {role:'ai', text:'结论总体可靠，核心依据是：'+p.summary.findings+'。', cite:p.citePage, paperId:p.id};
+  if (q.includes('贡献') || q.includes('创新')) return {role:'ai', text:'主要贡献在于：'+p.summary.oneLine};
+  if (q.includes('研究问题') || q.includes('问题')) return {role:'ai', text:'这篇文献试图回答的核心问题是：'+p.summary.question};
+  return {role:'ai', text:p.summary.oneLine+' 如果你想了解方法细节、结论可靠性或局限，可以直接追问。', cite:p.citePage, paperId:p.id};
+}
+
+/* =========================================================================
+   PROFILE TAB
+========================================================================= */
+function renderProfile(){
+  const cacheSize = '482 MB';
+  $('#profile-scroll').innerHTML = `
+    <div class="p-card">
+      <div class="h"><span class="msym">flag</span>研究主线</div>
+      <textarea class="p-textarea" id="thread-input">${state.threadNote}</textarea>
+      <div class="btn primary" id="thread-save" style="margin-top:10px; width:100%; justify-content:center;">保存</div>
+    </div>
+
+    <div class="p-card">
+      <div class="h"><span class="msym">workspace_premium</span>账户与会员</div>
+      <div class="p-row"><span class="l">当前计划</span><span class="r">识谛 Pro</span></div>
+      <div class="p-row"><span class="l">本月额度</span><span class="r">640 / 1000</span></div>
+      <div class="quota-bar"><div class="fill" style="width:64%;"></div></div>
+      <div class="btn" id="btn-upgrade" style="margin-top:12px; width:100%; justify-content:center;">管理订阅</div>
+    </div>
+
+    <div class="p-card">
+      <div class="h"><span class="msym">sync</span>数据与同步</div>
+      <div class="p-row"><span class="l">同步状态</span><span class="r">已同步 · 刚刚</span></div>
+      <div class="p-row"><span class="l">离线文献</span><span class="r">${PAPERS.filter(p=>p.status!=='unread').length} 篇</span></div>
+      <div class="p-row"><span class="l">缓存占用</span><span class="r">${cacheSize}</span></div>
+      <div class="btn" id="btn-clear-cache" style="margin-top:10px; width:100%; justify-content:center;">清除缓存</div>
+    </div>
+
+    <div class="p-card">
+      <div class="h"><span class="msym">ios_share</span>导出</div>
+      <div style="display:flex; gap:8px;">
+        <div class="btn" data-export="md" style="flex:1; justify-content:center;">Markdown</div>
+        <div class="btn" data-export="bib" style="flex:1; justify-content:center;">BibTeX</div>
+        <div class="btn" data-export="ris" style="flex:1; justify-content:center;">RIS</div>
+      </div>
+    </div>
+
+    <div class="p-card">
+      <div class="h"><span class="msym">tune</span>设置</div>
+      <div class="p-row"><span class="l">主题</span></div>
+      <div class="seg" style="margin-bottom:12px;">
+        <div class="o ${state.theme==='light'?'active':''}" data-theme="light">浅色</div>
+        <div class="o ${state.theme==='dark'?'active':''}" data-theme="dark">深色</div>
+      </div>
+      <div class="p-row"><span class="l">字号</span></div>
+      <div class="seg" style="margin-bottom:12px;">
+        <div class="o ${state.fontSize==='small'?'active':''}" data-fs="small">小</div>
+        <div class="o ${state.fontSize==='medium'?'active':''}" data-fs="medium">中</div>
+        <div class="o ${state.fontSize==='large'?'active':''}" data-fs="large">大</div>
+      </div>
+      <div class="p-row"><span class="l">摘要语言</span><span class="r">中文</span></div>
+      <div class="p-row"><span class="l">通知</span><div class="switch ${state.notifOn?'on':''}" id="notif-switch"><div class="knob"></div></div></div>
+    </div>
+
+    <div class="p-card">
+      <div class="h"><span class="msym">info</span>关于与反馈</div>
+      <div class="p-row" style="cursor:pointer;" id="about-row"><span class="l">关于识谛</span><span class="msym" style="font-size:16px; color:var(--c-text3);">chevron_right</span></div>
+      <div class="p-row" style="cursor:pointer;" id="feedback-row"><span class="l">意见反馈</span><span class="msym" style="font-size:16px; color:var(--c-text3);">chevron_right</span></div>
+    </div>
+  `;
+
+  $('#thread-save').addEventListener('click', () => { state.threadNote = $('#thread-input').value; toast('研究主线已更新'); });
+  $('#btn-upgrade').addEventListener('click', () => toast('已打开订阅管理（演示）'));
+  $('#btn-clear-cache').addEventListener('click', () => toast('缓存已清除'));
+  $all('[data-export]').forEach(b => b.addEventListener('click', () => toast('已导出为 shidea_export.' + b.dataset.export)));
+  $all('[data-theme]', $('#profile-scroll')).forEach(o => o.addEventListener('click', () => { setTheme(o.dataset.theme); renderProfile(); }));
+  $all('[data-fs]', $('#profile-scroll')).forEach(o => o.addEventListener('click', () => { setFontSize(o.dataset.fs); renderProfile(); }));
+  $('#notif-switch').addEventListener('click', function(){ state.notifOn = !state.notifOn; this.classList.toggle('on', state.notifOn); toast(state.notifOn?'通知已开启':'通知已关闭'); });
+  $('#about-row').addEventListener('click', () => toast('识谛 shidea · 随身科研工作台'));
+  $('#feedback-row').addEventListener('click', () => toast('感谢反馈，我们会尽快处理'));
+}
+
+function setTheme(t){ state.theme = t; $('#app-root').setAttribute('data-theme', t); }
+function setFontSize(sz){
+  state.fontSize = sz;
+  const map = {small:'14px', medium:'16px', large:'18px'};
+  document.getElementById('app-root').style.setProperty('--fs', map[sz]);
+}
+
+/* =========================================================================
+   INIT
+========================================================================= */
+renderBottomNav();
+renderLitList();
+switchTab('lit');
+</script>
+</body>
+</html>

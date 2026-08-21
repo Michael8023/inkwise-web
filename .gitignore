@@ -2,3 +2,14 @@ node_modules/
 dist/
 .env
 apps/*/.env
+
+# Expo / React Native
+.expo/
+apps/mobile/dist/
+apps/mobile/web-build/
+apps/mobile/src/components/pdf/pdfReaderHtml.generated.ts
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision

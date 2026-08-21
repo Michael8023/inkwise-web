@@ -65,6 +65,14 @@ Deno.serve(async (req) => {
       return json({ project: data });
     }
 
+    if (action === "delete") {
+      const projectId = clean(input.projectId, 100);
+      if (!projectId) throw new Error("PPT_PROJECT_REQUIRED");
+      const { error } = await db.from("ppt_projects").delete().eq("id", projectId).eq("user_id", currentUser.id);
+      if (error) throw error;
+      return json({ ok: true });
+    }
+
     if (action === "refresh-token") {
       const token = await createDocmeeToken(uid, 20);
       return json({ token, docmeeUid: uid });

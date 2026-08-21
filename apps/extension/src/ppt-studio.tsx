@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, Download, FileText, History, Presentation, Sparkles } from "lucide-react";
+import { ArrowLeft, Download, FileText, History, Presentation, Sparkles, Trash2 } from "lucide-react";
 import { CreatorType, DocmeeUI } from "@docmee/sdk-ui";
 import { functionRequest, supabase } from "./api";
 import type { LibraryPaper } from "./library";
@@ -23,11 +23,13 @@ async function embedRequest(input: Record<string, unknown>) {
   return payload as Record<string, any>;
 }
 
-function eventStatus(type: string) {
+function eventStatus(type: string): Project["status"] | undefined {
   if (["afterGenerate", "manuallySavePPT", "automaticSavePPT"].includes(type)) return "completed";
   if (["beforeGenerate", "beforeCreatePpt"].includes(type)) return "generating";
   if (type === "error") return "failed";
-  return "editing";
+  // Navigation, mount and template-dialog events must not overwrite a saved
+  // completed state with "editing".
+  return undefined;
 }
 
 export function PptStudio({ papers, extractText, userId: _userId }: { papers: LibraryPaper[]; extractText: (paper: LibraryPaper) => Promise<string>; userId?: string }) {
@@ -68,6 +70,16 @@ export function PptStudio({ papers, extractText, userId: _userId }: { papers: Li
       activeRef.current = session; setActive(session);
     } catch (caught) { setError(caught instanceof Error ? caught.message : "创建 PPT 任务失败"); }
     finally { setLoading(false); }
+  }
+
+  async function deleteProject(project: Project) {
+    if (!window.confirm(`删除“${project.title}”这条 PPT 任务记录？这不会删除 Docmee 中已经生成的 PPT。`)) return;
+    setError("");
+    try {
+      await embedRequest({ action: "delete", projectId: project.id });
+      setProjects(current => current.filter(item => item.id !== project.id));
+      if (active?.project.id === project.id) setActive(null);
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "删除 PPT 任务失败"); }
   }
 
   useEffect(() => {
@@ -126,5 +138,5 @@ export function PptStudio({ papers, extractText, userId: _userId }: { papers: Li
 
   if (active) return <section className="ppt-studio ppt-studio-v2 ppt-docmee-task"><header><div><span><Presentation size={15}/> DOCMEE PPT TASK CENTER</span><h1>{active.project.title}</h1><p>在任务中心继续修改大纲、选择模板、上传自定义模板并生成 PPT。</p></div><button className="ppt-back" onClick={() => { docmeeRef.current?.destroy(); setActive(null); }}><ArrowLeft size={16}/>返回任务列表</button></header><div id="docmee-ppt-v2-container" className="docmee-ppt-v2-container" /></section>;
 
-  return <section className="ppt-studio ppt-studio-v2"><header><div><span><Presentation size={15}/> DOCMEE PPT V2</span><h1>AI PPT 任务中心</h1><p>选择 PDF 后创建任务，随后在 Docmee V2 中完成大纲、模板和 PPT 生成。</p></div></header><form className="ppt-form ppt-config" onSubmit={event => { event.preventDefault(); void createProject(); }}><label>选择 PDF<select value={paperId} onChange={event => setPaperId(event.target.value)}>{usablePapers.length ? usablePapers.map(item => <option key={item.id} value={item.id}>{item.title}</option>) : <option value="">文献库暂无 PDF</option>}</select></label><label className="ppt-prompt">制作要求<textarea value={prompt} onChange={event => setPrompt(event.target.value)} maxLength={2000} placeholder="例如：面向组会汇报，突出研究问题、方法、实验结果和局限性。"/></label><button className="ppt-generate" disabled={!paperId || loading}><Sparkles size={17}/>{loading ? "正在创建任务…" : "创建 PPT 任务"}</button>{error && <p className="ppt-error">{error}</p>}</form><section className="ppt-history ppt-task-list"><div className="ppt-history-head"><span><History size={16}/>PPT 任务 <b>{projects.length}</b></span><small>点击任务继续编辑</small></div><div className="ppt-history-list">{projects.length ? projects.map(project => <article key={project.id}><button onClick={() => void openProject(project)}><FileText size={17}/><span><b>{project.title}</b><small>{new Date(project.updated_at).toLocaleString("zh-CN")}</small></span></button><em className={`ppt-status ${project.status}`}>{project.status === "completed" ? "已完成" : project.status === "generating" ? "生成中" : project.status === "failed" ? "失败" : "编辑中"}</em>{project.docmee_ppt_id && <a href="#ppt-task" onClick={event => event.preventDefault()} title="任务已绑定 Docmee PPT"><Download size={13}/></a>}</article>) : <p>还没有 PPT 任务。选择 PDF 并点击创建任务。</p>}</div></section></section>;
+  return <section className="ppt-studio ppt-studio-v2"><header><div><span><Presentation size={15}/> DOCMEE PPT V2</span><h1>AI PPT 任务中心</h1><p>选择 PDF 后创建任务，随后在 Docmee V2 中完成大纲、模板和 PPT 生成。</p></div></header><form className="ppt-form ppt-config" onSubmit={event => { event.preventDefault(); void createProject(); }}><label>选择 PDF<select value={paperId} onChange={event => setPaperId(event.target.value)}>{usablePapers.length ? usablePapers.map(item => <option key={item.id} value={item.id}>{item.title}</option>) : <option value="">文献库暂无 PDF</option>}</select></label><label className="ppt-prompt">制作要求<textarea value={prompt} onChange={event => setPrompt(event.target.value)} maxLength={2000} placeholder="例如：面向组会汇报，突出研究问题、方法、实验结果和局限性。"/></label><button className="ppt-generate" disabled={!paperId || loading}><Sparkles size={17}/>{loading ? "正在创建任务…" : "创建 PPT 任务"}</button>{error && <p className="ppt-error">{error}</p>}</form><section className="ppt-history ppt-task-list"><div className="ppt-history-head"><span><History size={16}/>PPT 任务 <b>{projects.length}</b></span><small>点击任务继续编辑</small></div><div className="ppt-history-list">{projects.length ? projects.map(project => <article key={project.id}><button onClick={() => void openProject(project)}><FileText size={17}/><span><b>{project.title}</b><small>{new Date(project.updated_at).toLocaleString("zh-CN")}</small></span></button><em className={`ppt-status ${project.status}`}>{project.status === "completed" ? "已完成" : project.status === "generating" ? "生成中" : project.status === "failed" ? "失败" : "编辑中"}</em>{project.docmee_ppt_id && <span className="ppt-docmee-bound" title="已绑定 Docmee PPT"><Download size={13}/></span>}<button className="ppt-task-delete" type="button" aria-label={`删除 ${project.title}`} title="删除任务记录" onClick={() => void deleteProject(project)}><Trash2 size={15}/></button></article>) : <p>还没有 PPT 任务。选择 PDF 并点击创建任务。</p>}</div></section></section>;
 }
