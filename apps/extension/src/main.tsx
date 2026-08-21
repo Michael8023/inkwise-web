@@ -10,6 +10,7 @@ import { functionRequest, supabase, supabaseConfigured } from "./api";
 import { LibraryScreen, listBrainstormPapers, type LibraryPaper, loadPaperState } from "./library";
 import {
   ChevronDown,
+  ChevronUp,
   ChevronLeft,
   ChevronRight,
   Check,
@@ -52,6 +53,7 @@ import {
   Wrench,
   Link2,
   KeyRound,
+  Pin,
 } from "lucide-react";
 import "./style.css";
 import "./storefront.css";
@@ -996,7 +998,7 @@ function OutlineTree({
     <>
       {items.map((item, index) => (
         <div
-          className="outline-entry"
+          className={`outline-entry outline-level-${Math.min(depth, 4)}`}
           key={`${item.title}-${index}`}
           style={{ paddingLeft: `${8 + depth * 14}px` }}
         >
@@ -1009,7 +1011,7 @@ function OutlineTree({
             ) : (
               <span className="outline-spacer" />
             )}
-            {item.title || "未命名章节"}
+            <span className="outline-title">{item.title || "未命名章节"}</span>{item.pageNumber ? <small>{item.pageNumber}</small> : null}
           </button>
           {item.items?.length ? (
             <OutlineTree
@@ -1192,34 +1194,57 @@ function VisualPopover({ selection, pageRef, onClose, onTask, onFollowup, onPale
   const [position, setPosition] = useState({ left: -9999, top: -9999 });
   const [followup, setFollowup] = useState("");
   const [collapsed, setCollapsed] = useState(false);
+  const [pinned, setPinned] = useState(false);
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  const dragRef = useRef<{ x: number; y: number; offsetX: number; offsetY: number } | null>(null);
+  const [anchor, setAnchor] = useState({ left: -9999, top: -9999 });
   useLayoutEffect(() => {
     const update = () => {
+      if (pinned) return;
       const page = pageRef.current, popover = ref.current;
       if (!page || !popover) return;
       const rect = page.getBoundingClientRect(), margin = 12;
       const anchorX = rect.left + rect.width * (selection.area.x + selection.area.width);
       const anchorY = rect.top + rect.height * selection.area.y;
+      setAnchor({ left: anchorX, top: anchorY });
       const width = popover.offsetWidth, height = popover.offsetHeight;
-      setPosition({ left: Math.min(Math.max(margin, anchorX + 9), window.innerWidth - width - margin), top: Math.min(Math.max(margin, anchorY), window.innerHeight - height - margin) });
+      setPosition({ left: Math.min(Math.max(margin, anchorX + 9 + dragOffset.x), window.innerWidth - width - margin), top: Math.min(Math.max(margin, anchorY + dragOffset.y), window.innerHeight - height - margin) });
     };
     update();
     const scroller = document.querySelector(".document-scroll");
-    scroller?.addEventListener("scroll", update, { passive: true }); window.addEventListener("resize", update);
+    if (!pinned) scroller?.addEventListener("scroll", update, { passive: true }); window.addEventListener("resize", update);
     const observer = new ResizeObserver(update); if (ref.current) observer.observe(ref.current);
     return () => { scroller?.removeEventListener("scroll", update); window.removeEventListener("resize", update); observer.disconnect(); };
-  }, [pageRef, selection.area, selection.task]);
+  }, [pageRef, selection.area, selection.task, pinned, dragOffset]);
+  useEffect(() => {
+    const onOutside = (event: PointerEvent) => {
+      if (!pinned && ref.current && !ref.current.contains(event.target as Node)) setCollapsed(true);
+    };
+    document.addEventListener("pointerdown", onOutside, true);
+    return () => document.removeEventListener("pointerdown", onOutside, true);
+  }, [pinned]);
+  function startDrag(event: React.PointerEvent<HTMLButtonElement>) {
+    event.preventDefault(); event.stopPropagation();
+    dragRef.current = { x: event.clientX, y: event.clientY, offsetX: dragOffset.x, offsetY: dragOffset.y };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+  function moveDrag(event: React.PointerEvent<HTMLButtonElement>) {
+    if (!dragRef.current) return;
+    setDragOffset({ x: dragRef.current.offsetX + event.clientX - dragRef.current.x, y: dragRef.current.offsetY + event.clientY - dragRef.current.y });
+  }
+  function stopDrag() { dragRef.current = null; }
   async function copyImage() {
     await copyImageDataUrl(selection.imageDataUrl);
   }
-  return <div ref={ref} className={`selection-popover visual-popover${collapsed ? " collapsed" : ""}`} style={position} onMouseDown={event => event.stopPropagation()} role="dialog" aria-label="图表操作">
-    <div className="visual-popover-header"><button className="popover-collapse" aria-label={collapsed ? "展开浮窗" : "折叠浮窗"} title={collapsed ? "展开" : "折叠"} onClick={() => setCollapsed(value => !value)}><ChevronDown size={15}/></button><div className="visual-title"><ScanLine size={15}/><strong>图表选区</strong><span>第 {selection.pageNumber} 页</span></div><button className="popover-close" aria-label="关闭" title="关闭" onClick={() => onClose(selection.id)}><X size={15}/></button></div>
+  return <><svg className="visual-selection-connector" aria-hidden="true"><line x1={anchor.left} y1={anchor.top} x2={position.left + 16} y2={position.top + 20} /></svg><div ref={ref} className={`selection-popover visual-popover${collapsed ? " collapsed" : ""}${pinned ? " pinned" : ""}`} style={position} onMouseDown={event => event.stopPropagation()} role="dialog" aria-label="图表操作">
+    <div className="visual-popover-header"><button className="popover-collapse" aria-label={collapsed ? "展开浮窗" : "折叠浮窗"} title={collapsed ? "展开" : "折叠"} onClick={() => setCollapsed(value => !value)}><ChevronDown size={15}/></button><button className="visual-pin" aria-label={pinned ? "取消固定浮窗" : "固定浮窗"} title={pinned ? "取消固定" : "固定浮窗位置"} onClick={() => setPinned(value => !value)}><Pin size={14}/></button><button className="visual-drag-handle" aria-label="拖动图表浮窗" title="拖动浮窗" onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={stopDrag} onPointerCancel={stopDrag}><GripVertical size={15}/></button><div className="visual-title"><ScanLine size={15}/><strong>图表选区</strong><span>第 {selection.pageNumber} 页</span></div><button className="popover-close" aria-label="关闭" title="关闭" onClick={() => onClose(selection.id)}><X size={15}/></button></div>
     {!collapsed && <div className="visual-popover-scroll">
       <img src={selection.imageDataUrl} alt="框选的 PDF 区域"/>
       <div className="popover-actions visual-actions"><button onClick={() => onTask(selection, "explain")} disabled={selection.task?.state === "loading"}><ImageIcon size={14}/>AI 解读</button><button onClick={() => onTask(selection, "table")} disabled={selection.task?.state === "loading"}><Table2 size={14}/>提取表格</button>{onPalette && <button onClick={() => onPalette(selection)}><Palette size={14}/>提取配色</button>}<button title="复制图片" onClick={() => copyImage().catch(() => undefined)}><Copy size={14}/></button><a title="下载图片" href={selection.imageDataUrl} download={`shidea-page-${selection.pageNumber}.jpg`}><Download size={14}/></a></div>
       {selection.task && <div className={`popover-result ${selection.task.state}`}>{selection.task.state === "loading" ? "正在理解图表…" : <><AiMarkdown>{selection.task.result || ""}</AiMarkdown>{selection.task.state === "done" && <button className="visual-copy-result" onClick={() => navigator.clipboard.writeText(selection.task?.result || "")}><Copy size={13}/>复制结果</button>}</>}</div>}
       {selection.task?.kind === "explain" && selection.task.state === "done" && <form className="explain-followup" onSubmit={event => { event.preventDefault(); const value=followup.trim(); if (!value || !onFollowup) return; onFollowup(selection,value); setFollowup(""); }}><input value={followup} onChange={event => setFollowup(event.target.value)} placeholder="继续追问这张图…"/><button disabled={!followup.trim()}><Send size={14}/></button></form>}
     </div>}
-  </div>;
+  </div></>;
 }
 
 function PageView({
@@ -1341,7 +1366,10 @@ function PageView({
         .map((item: any) => item.str)
         .join(" ");
       setPageText(extractedText);
-      detectPageVisualRegions(page, viewport, textContent).then(regions => { if (!cancelled) setVisualRegions(regions); }).catch(() => { if (!cancelled) setVisualRegions([]); });
+      // Automatic PDF.js image-position detection is intentionally disabled.
+      // Users can either draw an exact screenshot selection or explicitly run
+      // the MinerU layout analysis from the quick toolbar.
+      setVisualRegions([]);
       page.getAnnotations({ intent: "display" }).then((annotations: any[]) => {
         if (cancelled) return;
         const links = annotations.flatMap((annotation: any): PdfLink[] => {
@@ -1560,12 +1588,12 @@ function PageView({
         <div className="text-layer" ref={layerRef} /></>}
         {visualDraft && <div className="visual-selection-draft" style={{ left: `${visualDraft.x * 100}%`, top: `${visualDraft.y * 100}%`, width: `${visualDraft.width * 100}%`, height: `${visualDraft.height * 100}%` }} />}
         {mineruReady && <div className="pdf-link-regions" aria-label="PDF 链接">{pdfLinks.map(link => link.url ? <a key={link.id} href={link.url} target="_blank" rel="noopener noreferrer" className="pdf-link-region" style={{ left: `${link.area.x * 100}%`, top: `${link.area.y * 100}%`, width: `${link.area.width * 100}%`, height: `${link.area.height * 100}%` }} title={link.label} aria-label={link.label} onClick={event => event.stopPropagation()} /> : <button key={link.id} type="button" className="pdf-link-region" style={{ left: `${link.area.x * 100}%`, top: `${link.area.y * 100}%`, width: `${link.area.width * 100}%`, height: `${link.area.height * 100}%` }} title={link.label} aria-label={link.label} onClick={event => { event.stopPropagation(); onNavigate(link.destination); }} />)}</div>}
-        <div className="auto-visual-regions" aria-label="自动识别的文档结构区域">{(mineruReady ? mineruRegions : visualRegions).map(region => {
+        {mineruReady && <div className="auto-visual-regions" aria-label="版面分析识别的文档结构区域">{mineruRegions.map(region => {
           const label = region.kind === "table" ? "表格" : region.kind === "formula" ? "公式" : region.kind === "caption" ? (region.captionFor === "table" ? "表题" : region.captionFor === "image" ? "图题" : "标题") : "图片";
           const actionable = region.kind !== "caption";
           const copied = copiedVisualRegion === region.id;
           return <div key={region.id} className={`auto-visual-region ${region.kind}${activeVisualRegion === region.id ? " active" : ""}`} style={{ left: `${region.area.x * 100}%`, top: `${region.area.y * 100}%`, width: `${region.area.width * 100}%`, height: `${region.area.height * 100}%` }} onMouseEnter={() => setActiveVisualRegion(region.id)} onMouseLeave={() => { setActiveVisualRegion(current => current === region.id ? null : current); setCopiedVisualRegion(current => current === region.id ? null : current); }}><div className="auto-visual-actions"><span>{label}</span>{actionable && <><button className={copied ? "copied" : ""} title={region.kind === "formula" ? "复制公式源码" : "复制"} aria-label={`复制${label}`} disabled={region.kind === "formula" && !region.content} onClick={event => { event.stopPropagation(); setCopiedVisualRegion(region.id); copyVisualRegion(region).catch(() => setCopiedVisualRegion(null)); }}>{copied ? <Check size={13}/> : <Copy size={13}/>}</button><button title="结合论文解释" aria-label={`解释${label}`} onClick={event => { event.stopPropagation(); const selection=createSelectionFromRegion(region); if (selection) onVisualTask(selection,"explain"); }}><Sparkles size={13}/></button></>}</div></div>;
-        })}</div>
+        })}</div>}
         {visualSelections.map(selection => <div key={selection.id} className="visual-selection-area" style={{ left: `${selection.area.x * 100}%`, top: `${selection.area.y * 100}%`, width: `${selection.area.width * 100}%`, height: `${selection.area.height * 100}%` }} />)}
         <div className="temporary-selection-layer" aria-hidden="true">
           {selections.flatMap((selection) => selection.highlights.map((highlight, index) => (
@@ -1639,6 +1667,7 @@ function App() {
   const [paletteLoading, setPaletteLoading] = useState(false);
   const [mineruRegions, setMineruRegions] = useState<VisualRegion[]>([]);
   const [mineruReady, setMineruReady] = useState(false);
+  const [layoutEnabled, setLayoutEnabled] = useState(false);
   const [layoutState, setLayoutState] = useState<LayoutState>({ state: "idle" });
   const pdfBytes = useRef<ArrayBuffer | null>(null);
   const detectedDocumentTitle = useRef("");
@@ -1646,7 +1675,6 @@ function App() {
   const libraryHydrating = useRef(false);
   const librarySaveAttempted = useRef("");
   const restoredReaderFor = useRef<string | null>(null);
-  const autoLayoutDocument = useRef("");
   const autoSummaryDocument = useRef("");
   const summaryRequests = useRef(new Set<"short" | "full">());
   const pdfOpenVersion = useRef(0);
@@ -1707,6 +1735,7 @@ function App() {
   });
   const [urlError, setUrlError] = useState("");
   const [nativePdfView, setNativePdfView] = useState(() => new URL(window.location.href).searchParams.get("mode") === "compact");
+  const [quickToolbarOpen, setQuickToolbarOpen] = useState(true);
   const embeddedReader = new URL(window.location.href).searchParams.get("embedded") === "1";
 
   useEffect(() => {
@@ -1881,13 +1910,6 @@ function App() {
       if (error) showNotice("文章标题同步失败，将在下次打开时重试。", "error");
     });
   }, [session, currentPaperId, documentTitle]);
-  useEffect(() => {
-    if (nativePdfView || !session || !usage || !documentReady || !documentId || !paperStateLoaded || mineruReady || autoLayoutDocument.current === documentId) return;
-    autoLayoutDocument.current = documentId;
-    // Keep network and CPU available for the initial reading interaction.
-    const timer = window.setTimeout(() => void runMineruLayout(), 3500);
-    return () => window.clearTimeout(timer);
-  }, [nativePdfView, session, usage, documentReady, documentId, paperStateLoaded, mineruReady]);
   useEffect(() => {
     if (!pdf) return;
     // Open the reader as soon as PDF.js has finished loading it.
@@ -2220,7 +2242,7 @@ function App() {
     setPaperStateLoaded(!options.paperId);
     importSourceUrl.current = options.sourceUrl || null;
     pdfBytes.current = null;
-    setSelections([]); setHighlights([]); setVisualSelections([]); setPaletteSource(null); setPaletteColors([]); setVisualMode(false); setMineruRegions([]); setMineruReady(false); detectedDocumentTitle.current = ""; setDocumentTitle(""); setLayoutState({ state: "idle" }); autoLayoutDocument.current = "";
+    setSelections([]); setHighlights([]); setVisualSelections([]); setPaletteSource(null); setPaletteColors([]); setVisualMode(false); setMineruRegions([]); setMineruReady(false); setLayoutEnabled(false); detectedDocumentTitle.current = ""; setDocumentTitle(""); setLayoutState({ state: "idle" });
     setDocumentReady(false); setDocumentText(""); setDocumentTextReady(false); setPdf(null); setOutline([]);
     setFileName(name);
     setSummary({}); setSummaryOpen({ short: false, full: false });
@@ -2368,6 +2390,7 @@ function App() {
       return;
     }
     try {
+      setLayoutEnabled(true);
       const bytes = pdfBytes.current;
       setLayoutState({ state: "preparing", message: "正在优化您的阅读体验…", progress: 4 });
       const preparedResponse = await functionRequest("mineru-layout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "prepare", name: fileName || "document.pdf", fileSize: bytes.byteLength }) });
@@ -2433,6 +2456,7 @@ function App() {
       setMineruRegions(regions); setMineruReady(true);
       setLayoutState({ state: "done", message: regions.length ? `阅读体验优化完成：已识别 ${regions.filter((item: VisualRegion) => item.kind === "image").length} 张图片、${regions.filter((item: VisualRegion) => item.kind === "table").length} 个表格与 ${regions.filter((item: VisualRegion) => item.kind === "formula").length} 条公式` : "阅读体验优化完成，未发现可交互结构区域。", progress: 100 });
     } catch (error) {
+      setLayoutEnabled(false);
       const message = error instanceof Error ? error.message : "MINERU_REQUEST_FAILED";
       setLayoutState({ state: "error", message: message.includes("MINERU_API_TOKEN_NOT_CONFIGURED") ? "阅读体验优化暂不可用，仍可使用本地识别。" : "阅读体验优化暂未完成，仍可使用本地识别。" });
     }
@@ -2935,47 +2959,20 @@ function App() {
                 <Plus size={16} />
               </IconButton>
             </div>
-            <button className={`visual-tool-trigger${visualMode ? " active" : ""}`} aria-label={visualMode ? "退出 AI 识图" : "AI 识图：拖动鼠标框选图片或表格"} title={visualMode ? "退出 AI 识图" : "悬浮后拖动鼠标框选图片或表格"} onClick={() => { setVisualMode(value => !value); setSelections([]); }}>
-              <span className="visual-tool-icon"><Crop size={19} strokeWidth={2.5} /><i className={mineruReady ? "ready" : "pending"} /></span><span>AI 识图</span>
-            </button>
-            <IconButton label="智能版面分析" onClick={runMineruLayout} active={layoutState.state === "processing"}>
-              <ScanSearch size={17} />
-            </IconButton>
           </div>
         )}
-        <div className="topbar-right">
-          <button className="library-add-trigger" aria-label={currentPaperId ? "已添加到我的文献库" : "添加到我的文献库"} title={currentPaperId ? "已添加到我的文献库" : "添加到我的文献库"} onClick={() => void addCurrentDocumentToLibrary()}>
-            <span className="library-add-icon"><FilePlus2 size={18} /><i className={currentPaperId ? "ready" : "pending"} /></span><span>{currentPaperId ? "已在文献库" : "添加到我的文献库"}</span>
-          </button>
-          <IconButton label="下载 PDF" onClick={downloadPdf}>
-            <Download size={18} />
-          </IconButton>
-          <IconButton label="切换全屏" onClick={toggleFullscreen}>
-            <Maximize size={17} />
-          </IconButton>
-          <IconButton
-            label="切换主题"
-            onClick={() =>
-              setTheme((value) => (value === "light" ? "dark" : "light"))
-            }
-          >
-            {theme === "light" ? <Moon size={17} /> : <Sun size={17} />}
-          </IconButton>
-          <IconButton
-            label="切换 AI 面板"
-            onClick={() => setPanelOpen((value) => !value)}
-            active={panelOpen}
-          >
-            <PanelRight size={18} />
-          </IconButton>
-          <button className="account-trigger workspace-trigger" onClick={() => session ? setLibraryOpen(true) : setAuthOpen(true)}>
-            <FolderOpen size={17} /><span>文献工作台</span>
-          </button>
-          <button className="account-trigger" onClick={() => setAuthOpen(true)}>
-            {session ? <UserRound size={17} /> : <LogIn size={17} />}<span>{session ? "个人中心" : "登录"}</span>
-          </button>
-        </div>
+        <div className="topbar-right"><IconButton label="切换右侧栏" onClick={() => setPanelOpen((value) => !value)} active={panelOpen}><PanelRight size={18} /></IconButton></div>
       </header>
+      {pdf && <div className={`reader-subbar${quickToolbarOpen ? " open" : ""}`}>
+        <button className="reader-subbar-toggle" type="button" onClick={() => setQuickToolbarOpen(value => !value)} aria-label={quickToolbarOpen ? "收起工具栏" : "展开工具栏"}>{quickToolbarOpen ? <ChevronUp size={15}/> : <ChevronDown size={15}/>}<span>{quickToolbarOpen ? "收起工具" : "更多工具"}</span></button>
+        {quickToolbarOpen && <div className="reader-subbar-actions">
+          <button className={`reader-tool${visualMode ? " active" : ""}`} onClick={() => { setVisualMode(value => !value); setSelections([]); }}><Crop size={16}/><span>{visualMode ? "退出插图解析" : "插图 AI 解析"}</span></button>
+          <button className={`reader-tool${layoutEnabled ? " active" : ""}`} onClick={runMineruLayout} disabled={layoutState.state === "processing" || layoutState.state === "uploading" || layoutState.state === "downloading"}><ScanSearch size={16}/><span>{layoutState.state === "done" ? "重新版面分析" : "版面分析"}</span></button>
+          <button className="library-add-trigger" aria-label={currentPaperId ? "已添加到我的文献库" : "添加到我的文献库"} title={currentPaperId ? "已添加到我的文献库" : "添加到我的文献库"} onClick={() => void addCurrentDocumentToLibrary()}><span className="library-add-icon"><FilePlus2 size={18}/><i className={currentPaperId ? "ready" : "pending"}/></span><span>{currentPaperId ? "已在文献库" : "添加到我的文献库"}</span></button>
+          <IconButton label="下载 PDF" onClick={downloadPdf}><Download size={18}/></IconButton><IconButton label="切换全屏" onClick={toggleFullscreen}><Maximize size={17}/></IconButton><IconButton label="切换主题" onClick={() => setTheme(value => value === "light" ? "dark" : "light")}>{theme === "light" ? <Moon size={17}/> : <Sun size={17}/>}</IconButton>
+          <button className="account-trigger workspace-trigger" onClick={() => session ? setLibraryOpen(true) : setAuthOpen(true)}><FolderOpen size={17}/><span>文献工作台</span></button><button className="account-trigger" onClick={() => setAuthOpen(true)}>{session ? <UserRound size={17}/> : <LogIn size={17}/>}<span>{session ? "个人中心" : "登录"}</span></button>
+        </div>}
+      </div>}
       <main
         className={`workspace${railOpen ? " rail-open" : ""}${panelOpen ? " panel-open" : ""}`}
         style={{ "--panel-width": `${panelWidth}px` } as React.CSSProperties}
@@ -3032,7 +3029,7 @@ function App() {
                   visualMode={visualMode}
                   visualSelections={visualSelections.filter(item => item.pageNumber === index + 1)}
                   mineruRegions={mineruRegions.filter(item => item.pageNumber === index + 1)}
-                  mineruReady={mineruReady}
+                  mineruReady={mineruReady && layoutEnabled}
                   onVisualSelect={addVisualSelection}
                   onVisualClose={(id) => setVisualSelections(items => items.filter(item => item.id !== id))}
                   onVisualTask={runVisualTask}
