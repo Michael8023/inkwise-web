@@ -311,6 +311,13 @@ button {
 .reader-subbar:not(.open) { position: absolute; top: 6px; left: 0; z-index: 24; width: max-content; padding: 0; border: 0; background: transparent; box-shadow: none; }
 .workspace.rail-open > .reader-subbar:not(.open) { left: 250px; }
 .reader-subbar:not(.open) .reader-subbar-toggle { padding: 3px 6px; }
+.reader-guide-backdrop { position: fixed; z-index: 260; inset: 0; display: grid; place-items: center; background: rgb(12 30 43 / .46); padding: 20px; backdrop-filter: blur(5px); animation: reader-guide-fade .18s ease both; }
+.reader-guide { width: min(520px, 100%); overflow: hidden; border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border)); border-radius: 16px; background: var(--surface); box-shadow: 0 28px 72px rgb(8 24 36 / .28); color: var(--text); animation: reader-guide-enter .24s cubic-bezier(.2,.8,.2,1) both; }
+.reader-guide-header { display: flex; align-items: start; justify-content: space-between; border-bottom: 1px solid var(--border); padding: 20px 22px 16px; }.reader-guide-header span,.reader-guide-kicker { color: var(--accent); font-size: 10px; font-weight: 800; letter-spacing: .12em; }.reader-guide-header h2 { margin: 5px 0 0; font-size: 21px; letter-spacing: -.04em; }.reader-guide-close { display: grid; place-items: center; border: 0; border-radius: 7px; background: transparent; color: var(--text-muted); padding: 6px; cursor: pointer; }.reader-guide-close:hover { background: var(--accent-soft); color: var(--accent); }
+.reader-guide-progress { display: flex; justify-content: space-between; gap: 8px; padding: 18px 22px 0; }.reader-guide-progress button { display: grid; place-items: center; width: 25px; height: 25px; border: 1px solid var(--border); border-radius: 99px; background: var(--surface); color: var(--text-muted); padding: 0; font-size: 10px; cursor: pointer; }.reader-guide-progress button.active { border-color: var(--accent); background: var(--accent); color: #fff; box-shadow: 0 4px 10px color-mix(in srgb, var(--accent) 30%, transparent); }
+.reader-guide-main { min-height: 248px; padding: 22px; }.reader-guide-icon { display: grid; place-items: center; width: 54px; height: 54px; border-radius: 15px; background: var(--accent-soft); color: var(--accent); }.reader-guide-kicker { margin: 17px 0 5px; }.reader-guide-main h3 { margin: 0; font-size: 22px; letter-spacing: -.045em; }.reader-guide-body { margin: 11px 0; color: var(--text-secondary); font-size: 13px; line-height: 1.7; }.reader-guide-tip { margin: 0; border-radius: 8px; background: color-mix(in srgb, var(--accent-soft) 68%, transparent); color: var(--text-secondary); padding: 9px 10px; font-size: 11px; line-height: 1.55; }
+.reader-guide-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; border-top: 1px solid var(--border); padding: 14px 22px; }.reader-guide-actions button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 34px; border-radius: 7px; padding: 0 11px; font-size: 11px; font-weight: 700; cursor: pointer; }.reader-guide-primary { border: 0; background: var(--accent); color: #fff; }.reader-guide-secondary { margin-right: auto; border: 1px solid var(--border); background: var(--surface); color: var(--text-secondary); }.reader-guide-context { border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border)); background: var(--accent-soft); color: var(--accent); }
+@keyframes reader-guide-fade { from { opacity: 0; } to { opacity: 1; } } @keyframes reader-guide-enter { from { opacity: 0; transform: translateY(10px) scale(.98); } to { opacity: 1; transform: none; } }
 .zoom-group span {
   font-size: 12px;
   min-width: 40px;
@@ -1838,6 +1845,7 @@ body.is-resizing-panel * {
   .selection-popover {
     width: min(380px, calc(100vw - 24px));
   }
+  .reader-guide-backdrop { align-items: end; padding: 0; }.reader-guide { width: 100%; max-height: min(710px, 92dvh); border-right: 0; border-bottom: 0; border-left: 0; border-radius: 18px 18px 0 0; }.reader-guide-main { min-height: 230px; }.reader-guide-actions { padding: 13px 16px max(13px, env(safe-area-inset-bottom)); }.reader-guide-header,.reader-guide-progress,.reader-guide-main { padding-right: 16px; padding-left: 16px; }
 }
 
 /* Global reader notifications sit below the fixed toolbar and stack safely. */

@@ -9,13 +9,16 @@ import JSZip from "jszip";
 import { functionRequest, supabase, supabaseConfigured } from "./api";
 import { LibraryScreen, listBrainstormPapers, type LibraryPaper, loadPaperState } from "./library";
 import {
+  ArrowRight,
   ChevronDown,
   ChevronUp,
   ChevronLeft,
   ChevronRight,
   Check,
+  CircleHelp,
   Copy,
   FileText,
+  FolderKanban,
   FolderOpen,
   History,
   Maximize,
@@ -54,6 +57,7 @@ import {
   Link2,
   KeyRound,
   Pin,
+  Presentation,
 } from "lucide-react";
 import "./style.css";
 import "./storefront.css";
@@ -777,6 +781,32 @@ function IconButton({
       {children}
     </button>
   );
+}
+
+const guideSteps = [
+  { title: "导入第一篇文献", icon: FolderOpen, body: "从欢迎页打开本地 PDF，或使用“导入论文链接”加载 DOI / 公共 PDF 链接。", tip: "文档会留在当前阅读空间，不会自动上传到第三方。" },
+  { title: "边读边问 AI", icon: Sparkles, body: "在右侧 AI 助手中生成摘要、针对全文提问；选中文本后可解释、翻译、高亮或添加笔记。", tip: "AI 功能需要登录并选择可用模型。" },
+  { title: "解析图表与公式", icon: Crop, body: "用“截图解析”框选图片、表格或公式；需要自动定位结构时，再点击“版面识别”。", tip: "版面识别默认关闭，只有主动点击后才会运行。" },
+  { title: "整理到文献工作台", icon: FolderKanban, body: "点击“添加到文献库”保存当前文献，在工作台用文件夹、标签和“我的工作概述”建立研究主线。", tip: "工作台与研究主线需要登录后使用。" },
+  { title: "获得研究启发", icon: Brain, body: "打开右侧 Brainstorm，结合当前论文、研究主线和最多 5 篇文献库资料，生成有证据边界的下一步想法。", tip: "先在文献工作台填写研究主线，结果会更贴合。" },
+  { title: "制作汇报 PPT", icon: Presentation, body: "从文献工作台进入“AI PPT 制作”，创建任务后修改大纲、选择或上传模板，并在任务中心生成、下载 PPT。", tip: "PPT 任务会按用户隔离保存，点击任务可继续编辑。" },
+] as const;
+
+function ReaderGuide({ onClose, onOpenLibrary, onOpenPanel }: { onClose: () => void; onOpenLibrary: () => void; onOpenPanel: (tab: "brainstorm" | "tools") => void }) {
+  const [step, setStep] = useState(0);
+  const item = guideSteps[step];
+  const Icon = item.icon;
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  return <div className="reader-guide-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}><section className="reader-guide" role="dialog" aria-modal="true" aria-labelledby="reader-guide-title">
+    <header className="reader-guide-header"><div><span>SHIDEA / QUICK START</span><h2 id="reader-guide-title">使用说明</h2></div><button type="button" className="reader-guide-close" onClick={onClose} aria-label="关闭使用说明"><X size={18}/></button></header>
+    <div className="reader-guide-progress">{guideSteps.map((guide, index) => <button key={guide.title} type="button" className={index === step ? "active" : ""} onClick={() => setStep(index)} aria-label={`第 ${index + 1} 步：${guide.title}`}><span>{index + 1}</span></button>)}</div>
+    <div className="reader-guide-main"><div className="reader-guide-icon"><Icon size={27}/></div><p className="reader-guide-kicker">第 {step + 1} 步 / 共 {guideSteps.length} 步</p><h3>{item.title}</h3><p className="reader-guide-body">{item.body}</p><p className="reader-guide-tip">提示：{item.tip}</p></div>
+    <div className="reader-guide-actions">{step === 3 && <button type="button" className="reader-guide-context" onClick={() => { onClose(); onOpenLibrary(); }}>打开文献工作台 <ArrowRight size={14}/></button>}{step === 4 && <><button type="button" className="reader-guide-context" onClick={() => { onClose(); onOpenPanel("brainstorm"); }}>打开 Brainstorm <ArrowRight size={14}/></button><button type="button" className="reader-guide-context" onClick={() => { onClose(); onOpenPanel("tools"); }}>打开科研工具箱 <ArrowRight size={14}/></button></>}{step > 0 && <button type="button" className="reader-guide-secondary" onClick={() => setStep(value => value - 1)}>上一步</button>}<button type="button" className="reader-guide-primary" onClick={() => step === guideSteps.length - 1 ? onClose() : setStep(value => value + 1)}>{step === guideSteps.length - 1 ? "开始阅读" : "下一步"}<ArrowRight size={15}/></button></div>
+  </section></div>;
 }
 
 function NoticeStack({ notices, onDismiss }: { notices: AppNotice[]; onDismiss: (id: string) => void }) {
@@ -1737,6 +1767,7 @@ function App() {
   const [nativePdfView, setNativePdfView] = useState(() => new URL(window.location.href).searchParams.get("mode") === "compact");
   const [quickToolbarOpen, setQuickToolbarOpen] = useState(true);
   const [quickToolbarCompact, setQuickToolbarCompact] = useState(false);
+  const [guideOpen, setGuideOpen] = useState(false);
   const embeddedReader = new URL(window.location.href).searchParams.get("embedded") === "1";
 
   useEffect(() => {
@@ -2992,6 +3023,7 @@ function App() {
               <button className={`reader-tool${layoutEnabled ? " active" : ""}`} title={layoutState.state === "done" ? "重新版面识别" : "版面识别：自动定位图片、表格、公式和标题"} onClick={runMineruLayout} disabled={layoutState.state === "processing" || layoutState.state === "uploading" || layoutState.state === "downloading"}><ScanSearch size={16}/><span>{layoutState.state === "done" ? "重新版面识别" : "版面识别"}</span></button>
               <button className="reader-tool reader-library-tool" title={currentPaperId ? "已添加到我的文献库" : "添加到我的文献库"} onClick={() => void addCurrentDocumentToLibrary()}><span className="library-add-icon"><FilePlus2 size={17}/><i className={currentPaperId ? "ready" : "pending"}/></span><span>{currentPaperId ? "已在文献库" : "添加到文献库"}</span></button>
               <button className="reader-tool" title="下载 PDF" onClick={downloadPdf}><Download size={17}/><span>下载 PDF</span></button><button className="reader-tool" title="切换全屏" onClick={toggleFullscreen}><Maximize size={17}/><span>全屏</span></button><button className="reader-tool" title="切换主题" onClick={() => setTheme(value => value === "light" ? "dark" : "light")}>{theme === "light" ? <Moon size={17}/> : <Sun size={17}/>}<span>{theme === "light" ? "夜间模式" : "日间模式"}</span></button>
+              <button className="reader-tool" title="使用说明：快速了解阅读、研究与 PPT 工作流" onClick={() => setGuideOpen(true)}><CircleHelp size={17}/><span>使用说明</span></button>
               <button className="reader-tool reader-mode-switch" title={quickToolbarCompact ? "切换为完整模式" : "切换为简洁模式"} onClick={() => setQuickToolbarCompact(value => !value)}><SlidersHorizontal size={16}/><span>{quickToolbarCompact ? "完整模式" : "简洁模式"}</span></button>
             </div>
           </div>
@@ -3208,6 +3240,7 @@ function App() {
           </div>}
         </aside>
       </main>
+      {guideOpen && <ReaderGuide onClose={() => setGuideOpen(false)} onOpenLibrary={() => { if (session) setLibraryOpen(true); else setAuthOpen(true); }} onOpenPanel={tab => { setPanelOpen(true); setSidePanelTab(tab); setActiveResearchTool(null); }}/>}
       <NoticeStack notices={notices} onDismiss={dismissNotice}/>
         {authOpen && (session ? <AccountDialog session={session} usage={usage} inviteCode={inviteCode} onClose={() => setAuthOpen(false)} onSignOut={() => { signOut(); setAuthOpen(false); }} onOpenFeedback={() => { setAuthOpen(false); setFeedbackOpen(true); }} onOpenPurchase={() => { setAuthOpen(false); setPurchaseOpen(true); }} /> : <AuthDialog mode={authMode} email={authEmail} password={authPassword} passwordConfirm={authPasswordConfirm} name={authName} inviteCode={authInviteCode} code={authCode} error={authError} notice={authNotice} verifying={authVerifying} resetting={authResetting} resetVerifying={authResetVerifying} busy={authBusy} busyLabel={authBusyLabel} onClose={() => setAuthOpen(false)} onSubmit={submitAuth} onVerify={verifyEmailCode} onResend={resendEmailCode} onResetRequest={requestPasswordReset} onResetVerify={resetPassword} onResetResend={requestPasswordReset} onOpenReset={beginPasswordReset} onBackToLogin={backToLogin} onModeChange={(nextMode) => { setAuthMode(nextMode); setAuthVerifying(false); setAuthResetting(false); setAuthResetVerifying(false); setAuthError(""); setAuthNotice(""); }} onEmail={setAuthEmail} onPassword={setAuthPassword} onPasswordConfirm={setAuthPasswordConfirm} onName={setAuthName} onInviteCode={setAuthInviteCode} onCode={setAuthCode} />)}
       {purchaseOpen && <PurchaseDialog busy={purchaseBusy} error={purchaseError} onClose={() => { setPurchaseOpen(false); setPurchaseError(""); }} onBack={() => { setPurchaseOpen(false); setAuthOpen(true); }} onPurchase={purchaseCredits} />}

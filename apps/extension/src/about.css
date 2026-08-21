@@ -397,6 +397,9 @@ body.about-active #root {
   border-color: #9bcfc8;
   box-shadow: 0 22px 45px #143a441c;
 }
+.workflow-grid .feature-card { min-height: 440px; }
+.tool-palette-preview { display: grid; grid-template-columns: auto repeat(3, 1fr); align-items: center; gap: 8px; margin-top: 35px; border: 1px solid #dce6e9; border-radius: 9px; background: #f7fcfb; padding: 17px; color: var(--teal); }
+.tool-palette-preview span { display: block; height: 70px; border-radius: 6px; background: #117b78; }.tool-palette-preview span:nth-of-type(2) { background: #e7a74e; }.tool-palette-preview span:nth-of-type(3) { background: #7a83cc; }.tool-palette-preview b { grid-column: 1 / -1; color: #52717d; font-size: 10px; }
 .feature-card.wide {
   grid-row: auto;
   min-height: 480px;
@@ -532,6 +535,10 @@ body.about-active #root {
   grid-template-columns: 1.15fr 0.85fr;
   padding-top: 55px;
 }
+.ppt-showcase { border-top: 1px solid var(--line); }
+.ppt-flow-preview { width: 100%; max-width: 590px; }
+.ppt-flow-body { display: flex; align-items: center; justify-content: center; gap: 13px; min-height: 245px; background: linear-gradient(145deg, #f5fbfa, #edf4fa); padding: 28px 20px; color: var(--teal); }
+.ppt-flow-source,.ppt-flow-task,.ppt-flow-output { display: grid; justify-items: center; gap: 7px; min-width: 105px; border: 1px solid #d5e6e5; border-radius: 11px; background: #fff; padding: 17px 11px; text-align: center; }.ppt-flow-source b,.ppt-flow-output b { color: #254f61; font-size: 12px; }.ppt-flow-source small,.ppt-flow-output small { color: #7c919a; font-size: 9px; }.ppt-flow-task { min-width: 165px; justify-items: start; text-align: left; }.ppt-flow-task span { color: #0b8782; font-size: 9px; font-weight: 800; }.ppt-flow-task b { color: #264d60; font-size: 11px; line-height: 1.45; }.ppt-flow-task i { color: #7d929a; font-size: 9px; font-style: normal; }
 .showcase-copy > a {
   display: inline-flex;
   align-items: center;
@@ -1109,6 +1116,7 @@ footer > a:last-child {
     padding-top: 0;
   }
 }
+@media (max-width: 620px) { .ppt-flow-body { flex-direction: column; }.ppt-flow-body > svg { transform: rotate(90deg); }.ppt-flow-source,.ppt-flow-task,.ppt-flow-output { width: min(260px, 100%); }.ppt-flow-task { justify-items: center; text-align: center; } }
 @media (max-width: 640px) {
   .about-nav {
     height: 62px;
