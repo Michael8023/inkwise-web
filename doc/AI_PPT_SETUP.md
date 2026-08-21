@@ -1,5 +1,25 @@
 # AI PPT 制作配置
 
+## Docmee V2 iframe（当前实现）
+
+PPT 任务中心现在直接使用 Docmee 官方 iframe SDK，而不是 Apilio 的
+Docmee 兼容 API。部署前执行：
+
+```bash
+supabase db push
+supabase functions deploy docmee-embed
+supabase secrets set DOCMEE_API_KEY=你的_Docmee_开放平台_API_KEY
+```
+
+`docmee-embed` 仅在服务端调用 `https://docmee.cn/api/user/createApiToken`。
+它始终用 `shidea:{Supabase user id}` 作为 Docmee `uid`，因此不同登录用户
+得到不同的 Docmee 数据空间：其 PPT、上传文件和自定义模板不会互相可见。
+切勿在前端、浏览器环境变量或源码中配置 `DOCMEE_API_KEY`。
+
+首次在文献库创建 PPT 任务时，应用会将所选 PDF 作为私有文件传给 Docmee
+Creator V2，并跳转到任务中心；后续从任务列表打开时会直接进入对应的编辑页。
+Docmee Creator 内处理大纲编辑、系统模板选择、上传个人自定义模板和导出 PPTX。
+
 工作台的“AI PPT 制作”使用 Apilio 已聚合的文多多（DocMee 官方格式）生成 PPT。浏览器不会保存或发送密钥；请求始终经过 Supabase Edge Function `ai-ppt`。
 
 ## 部署 Function

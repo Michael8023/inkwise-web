@@ -38,3 +38,7 @@ verify_jwt = true
 verify_jwt = true
 [functions.mineru-upload]
 verify_jwt = true
+[functions.pdf-extract-text]
+verify_jwt = true
+[functions.docmee-embed]
+verify_jwt = true
