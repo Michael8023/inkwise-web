@@ -2962,7 +2962,7 @@ function App() {
             </div>
           </div>
         )}
-        <div className="topbar-right"><IconButton label="切换右侧栏" onClick={() => setPanelOpen((value) => !value)} active={panelOpen}><PanelRight size={18} /></IconButton></div>
+        <div className="topbar-right"><button className="account-trigger workspace-trigger" onClick={() => session ? setLibraryOpen(true) : setAuthOpen(true)}><FolderOpen size={17}/><span>文献工作台</span></button><button className="account-trigger" onClick={() => setAuthOpen(true)}>{session ? <UserRound size={17}/> : <LogIn size={17}/>}<span>{session ? "个人中心" : "登录"}</span></button><IconButton label="切换右侧栏" onClick={() => setPanelOpen((value) => !value)} active={panelOpen}><PanelRight size={18} /></IconButton></div>
       </header>
       <main
         className={`workspace${railOpen ? " rail-open" : ""}${panelOpen ? " panel-open" : ""}`}
@@ -2993,9 +2993,6 @@ function App() {
               <button className="reader-tool reader-library-tool" title={currentPaperId ? "已添加到我的文献库" : "添加到我的文献库"} onClick={() => void addCurrentDocumentToLibrary()}><span className="library-add-icon"><FilePlus2 size={17}/><i className={currentPaperId ? "ready" : "pending"}/></span><span>{currentPaperId ? "已在文献库" : "添加到文献库"}</span></button>
               <button className="reader-tool" title="下载 PDF" onClick={downloadPdf}><Download size={17}/><span>下载 PDF</span></button><button className="reader-tool" title="切换全屏" onClick={toggleFullscreen}><Maximize size={17}/><span>全屏</span></button><button className="reader-tool" title="切换主题" onClick={() => setTheme(value => value === "light" ? "dark" : "light")}>{theme === "light" ? <Moon size={17}/> : <Sun size={17}/>}<span>{theme === "light" ? "夜间模式" : "日间模式"}</span></button>
               <button className="reader-tool reader-mode-switch" title={quickToolbarCompact ? "切换为完整模式" : "切换为简洁模式"} onClick={() => setQuickToolbarCompact(value => !value)}><SlidersHorizontal size={16}/><span>{quickToolbarCompact ? "完整模式" : "简洁模式"}</span></button>
-            </div>
-            <div className="reader-subbar-actions reader-subbar-right">
-              <button className="account-trigger workspace-trigger" title="文献工作台" onClick={() => session ? setLibraryOpen(true) : setAuthOpen(true)}><FolderOpen size={17}/><span>文献工作台</span></button><button className="account-trigger" title={session ? "个人中心" : "登录"} onClick={() => setAuthOpen(true)}>{session ? <UserRound size={17}/> : <LogIn size={17}/>}<span>{session ? "个人中心" : "登录"}</span></button>
             </div>
           </div>
         </div>}
