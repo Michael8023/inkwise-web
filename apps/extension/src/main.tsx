@@ -1736,6 +1736,7 @@ function App() {
   const [urlError, setUrlError] = useState("");
   const [nativePdfView, setNativePdfView] = useState(() => new URL(window.location.href).searchParams.get("mode") === "compact");
   const [quickToolbarOpen, setQuickToolbarOpen] = useState(true);
+  const [quickToolbarCompact, setQuickToolbarCompact] = useState(false);
   const embeddedReader = new URL(window.location.href).searchParams.get("embedded") === "1";
 
   useEffect(() => {
@@ -2963,16 +2964,6 @@ function App() {
         )}
         <div className="topbar-right"><IconButton label="切换右侧栏" onClick={() => setPanelOpen((value) => !value)} active={panelOpen}><PanelRight size={18} /></IconButton></div>
       </header>
-      {pdf && <div className={`reader-subbar${quickToolbarOpen ? " open" : ""}`}>
-        <button className="reader-subbar-toggle" type="button" onClick={() => setQuickToolbarOpen(value => !value)} aria-label={quickToolbarOpen ? "收起工具栏" : "展开工具栏"}>{quickToolbarOpen ? <ChevronUp size={15}/> : <ChevronDown size={15}/>}<span>{quickToolbarOpen ? "收起工具" : "更多工具"}</span></button>
-        {quickToolbarOpen && <div className="reader-subbar-actions">
-          <button className={`reader-tool${visualMode ? " active" : ""}`} onClick={() => { setVisualMode(value => !value); setSelections([]); }}><Crop size={16}/><span>{visualMode ? "退出插图解析" : "插图 AI 解析"}</span></button>
-          <button className={`reader-tool${layoutEnabled ? " active" : ""}`} onClick={runMineruLayout} disabled={layoutState.state === "processing" || layoutState.state === "uploading" || layoutState.state === "downloading"}><ScanSearch size={16}/><span>{layoutState.state === "done" ? "重新版面分析" : "版面分析"}</span></button>
-          <button className="library-add-trigger" aria-label={currentPaperId ? "已添加到我的文献库" : "添加到我的文献库"} title={currentPaperId ? "已添加到我的文献库" : "添加到我的文献库"} onClick={() => void addCurrentDocumentToLibrary()}><span className="library-add-icon"><FilePlus2 size={18}/><i className={currentPaperId ? "ready" : "pending"}/></span><span>{currentPaperId ? "已在文献库" : "添加到我的文献库"}</span></button>
-          <IconButton label="下载 PDF" onClick={downloadPdf}><Download size={18}/></IconButton><IconButton label="切换全屏" onClick={toggleFullscreen}><Maximize size={17}/></IconButton><IconButton label="切换主题" onClick={() => setTheme(value => value === "light" ? "dark" : "light")}>{theme === "light" ? <Moon size={17}/> : <Sun size={17}/>}</IconButton>
-          <button className="account-trigger workspace-trigger" onClick={() => session ? setLibraryOpen(true) : setAuthOpen(true)}><FolderOpen size={17}/><span>文献工作台</span></button><button className="account-trigger" onClick={() => setAuthOpen(true)}>{session ? <UserRound size={17}/> : <LogIn size={17}/>}<span>{session ? "个人中心" : "登录"}</span></button>
-        </div>}
-      </div>}
       <main
         className={`workspace${railOpen ? " rail-open" : ""}${panelOpen ? " panel-open" : ""}`}
         style={{ "--panel-width": `${panelWidth}px` } as React.CSSProperties}
@@ -2993,6 +2984,21 @@ function App() {
             <p>打开文档后显示大纲。</p>
           )}
         </nav>
+        {pdf && <div className={`reader-subbar${quickToolbarOpen ? " open" : ""}${quickToolbarCompact ? " compact" : " complete"}`}>
+          <button className="reader-subbar-toggle" type="button" onClick={() => setQuickToolbarOpen(value => !value)} aria-label={quickToolbarOpen ? "收起工具栏" : "展开工具栏"}>{quickToolbarOpen ? <ChevronUp size={15}/> : <ChevronDown size={15}/>}<span>{quickToolbarOpen ? "收起工具" : "更多工具"}</span></button>
+          <div className="reader-subbar-content">
+            <div className="reader-subbar-actions reader-subbar-left">
+              <button className={`reader-tool${visualMode ? " active" : ""}`} title={visualMode ? "退出插图解析" : "插图 AI 解析"} onClick={() => { setVisualMode(value => !value); setSelections([]); }}><Crop size={16}/><span>{visualMode ? "退出插图解析" : "插图 AI 解析"}</span></button>
+              <button className={`reader-tool${layoutEnabled ? " active" : ""}`} title={layoutState.state === "done" ? "重新版面分析" : "版面分析"} onClick={runMineruLayout} disabled={layoutState.state === "processing" || layoutState.state === "uploading" || layoutState.state === "downloading"}><ScanSearch size={16}/><span>{layoutState.state === "done" ? "重新版面分析" : "版面分析"}</span></button>
+              <button className="reader-tool reader-library-tool" title={currentPaperId ? "已添加到我的文献库" : "添加到我的文献库"} onClick={() => void addCurrentDocumentToLibrary()}><span className="library-add-icon"><FilePlus2 size={17}/><i className={currentPaperId ? "ready" : "pending"}/></span><span>{currentPaperId ? "已在文献库" : "添加到文献库"}</span></button>
+              <button className="reader-tool" title="下载 PDF" onClick={downloadPdf}><Download size={17}/><span>下载 PDF</span></button><button className="reader-tool" title="切换全屏" onClick={toggleFullscreen}><Maximize size={17}/><span>全屏</span></button><button className="reader-tool" title="切换主题" onClick={() => setTheme(value => value === "light" ? "dark" : "light")}>{theme === "light" ? <Moon size={17}/> : <Sun size={17}/>}<span>{theme === "light" ? "夜间模式" : "日间模式"}</span></button>
+              <button className="reader-tool reader-mode-switch" title={quickToolbarCompact ? "切换为完整模式" : "切换为简洁模式"} onClick={() => setQuickToolbarCompact(value => !value)}><SlidersHorizontal size={16}/><span>{quickToolbarCompact ? "完整模式" : "简洁模式"}</span></button>
+            </div>
+            <div className="reader-subbar-actions reader-subbar-right">
+              <button className="account-trigger workspace-trigger" title="文献工作台" onClick={() => session ? setLibraryOpen(true) : setAuthOpen(true)}><FolderOpen size={17}/><span>文献工作台</span></button><button className="account-trigger" title={session ? "个人中心" : "登录"} onClick={() => setAuthOpen(true)}>{session ? <UserRound size={17}/> : <LogIn size={17}/>}<span>{session ? "个人中心" : "登录"}</span></button>
+            </div>
+          </div>
+        </div>}
         <section className="viewer">
           <div
             className="document-scroll"
